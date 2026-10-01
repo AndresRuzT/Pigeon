@@ -43,7 +43,7 @@ services:
     image: postgres:16-alpine
     container_name: pigeon-postgres
     ports:
-      - "5432:5432"
+      - "${PIGEON_POSTGRES_PORT:-5433}:5432"
     environment:
       POSTGRES_DB: pigeon
       POSTGRES_USER: ${PIGEON_DB_USER:-pigeon_app}
