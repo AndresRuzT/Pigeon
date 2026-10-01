@@ -1,0 +1,1 @@
+Banco Pigeon: Recordatorio de pago de [(${amount})] [(${currency})] vence el [(${dueDate})] para cuenta *[(${accountLast4})].

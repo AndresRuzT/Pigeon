@@ -45,9 +45,19 @@ class RabbitMessagingListenersTest {
     @Mock
     private RabbitOperations rabbitTemplate;
 
+    @Mock
+    private io.github.andres.pigeon.application.port.out.NotificationRepository notificationRepository;
+
+    @Mock
+    private io.github.andres.pigeon.application.port.out.AuditLogPort auditLogPort;
+
+    @Mock
+    private io.github.andres.pigeon.application.port.out.ClockPort clockPort;
+
     private ObjectMapper objectMapper;
     private RabbitNotificationListener notificationListener;
     private RabbitInboundEventListener inboundEventListener;
+    private io.github.andres.pigeon.infrastructure.adapter.in.messaging.RabbitExpiredListener expiredListener;
 
     @BeforeEach
     void setUp() {
@@ -56,6 +66,9 @@ class RabbitMessagingListenersTest {
 
         notificationListener = new RabbitNotificationListener(processNotificationUseCase, rabbitTemplate, objectMapper);
         inboundEventListener = new RabbitInboundEventListener(ingestEventUseCase, rabbitTemplate, objectMapper);
+        expiredListener = new io.github.andres.pigeon.infrastructure.adapter.in.messaging.RabbitExpiredListener(
+                notificationRepository, auditLogPort, clockPort, objectMapper
+        );
     }
 
     private Message createMessage(String payload) {
@@ -156,5 +169,29 @@ class RabbitMessagingListenersTest {
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
         verify(rabbitTemplate).send(eq(RabbitConfig.DLX_EXCHANGE), eq(RabbitConfig.ROUTING_KEY_DEAD), messageCaptor.capture());
         assertThat((String) messageCaptor.getValue().getMessageProperties().getHeader("x-failure-reason")).isEqualTo("SENSITIVE_DATA_DETECTED");
+    }
+
+    @Test
+    @DisplayName("Should mark notification as EXPIRED when TTL expires in high priority queue")
+    void shouldMarkNotificationAsExpiredWhenTtlExpires() {
+        UUID id = UUID.randomUUID();
+        String payload = """
+                {"notificationId":"%s","eventType":"OTP_REQUESTED","priority":"HIGH"}
+                """.formatted(id);
+
+        io.github.andres.pigeon.domain.model.Notification notification = io.github.andres.pigeon.domain.model.Notification.createPending(
+                "bank", io.github.andres.pigeon.domain.vo.IdempotencyKey.of("k"), "h",
+                io.github.andres.pigeon.domain.vo.CustomerId.of("c"), io.github.andres.pigeon.domain.enums.EventType.OTP_REQUESTED,
+                "en", java.util.Map.of(), java.time.Instant.now()
+        );
+        when(clockPort.now()).thenReturn(java.time.Instant.now());
+        when(notificationRepository.findById(id)).thenReturn(java.util.Optional.of(notification));
+
+        expiredListener.onExpiredMessage(createMessage(payload));
+
+        assertThat(notification.getStatus()).isEqualTo(io.github.andres.pigeon.domain.enums.NotificationStatus.FAILED);
+        assertThat(notification.getFailureReason()).isEqualTo(io.github.andres.pigeon.domain.enums.FailureReason.EXPIRED);
+        verify(notificationRepository).save(notification);
+        verify(auditLogPort).append(any());
     }
 }

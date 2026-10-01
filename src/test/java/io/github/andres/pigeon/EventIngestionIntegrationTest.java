@@ -97,6 +97,7 @@ class EventIngestionIntegrationTest {
         registry.add("pigeon.security.jwt.public-key-location", () -> "classpath:certs/app.pub");
         registry.add("pigeon.outbox.poll-interval-ms", () -> "100");
         registry.add("pigeon.providers.sms.base-url", () -> "http://localhost:" + wireMockServer.port());
+        registry.add("pigeon.providers.push.base-url", () -> "http://localhost:" + wireMockServer.port());
         registry.add("management.health.mail.enabled", () -> "false");
     }
 
@@ -151,6 +152,16 @@ class EventIngestionIntegrationTest {
     @BeforeEach
     void resetWireMock() {
         wireMockServer.resetAll();
+        stubFor(WireMock.post("/api/v1/push")
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"providerRef\":\"wm_push_ok_default\",\"status\":\"ACCEPTED\"}")));
+        stubFor(WireMock.post("/api/v1/sms")
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"providerRef\":\"wm_sms_ok_default\",\"status\":\"ACCEPTED\"}")));
     }
 
     @Test
@@ -266,8 +277,13 @@ class EventIngestionIntegrationTest {
     }
 
     @Test
-    @DisplayName("Resilience fault-injection test: SMS 500 error causes fallback to Email")
+    @DisplayName("Resilience fault-injection test: Push and SMS 500 errors cause fallback cascade to Email")
     void shouldFallbackToEmailWhenSmsFails() throws Exception {
+        stubFor(WireMock.post("/api/v1/push")
+                .willReturn(aResponse()
+                        .withStatus(500)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"error\":\"PUSH_GATEWAY_DOWN\"}")));
         stubFor(WireMock.post("/api/v1/sms")
                 .willReturn(aResponse()
                         .withStatus(500)
@@ -293,7 +309,7 @@ class EventIngestionIntegrationTest {
 
         String notificationId = objectMapper.readTree(responseBody).path("notificationId").asText();
 
-        // Await delivery orchestrator fallback to EMAIL
+        // Await delivery orchestrator fallback cascade PUSH -> SMS -> EMAIL
         await().atMost(Duration.ofSeconds(15))
                 .pollInterval(Duration.ofMillis(300))
                 .untilAsserted(() -> {
@@ -301,10 +317,49 @@ class EventIngestionIntegrationTest {
                                     .header("Authorization", "Bearer " + validJwtToken))
                             .andExpect(status().isOk())
                             .andExpect(jsonPath("$.status", is("DELIVERED")))
-                            .andExpect(jsonPath("$.attempts.length()", is(2)));
+                            .andExpect(jsonPath("$.attempts.length()", is(3)));
                 });
 
+        verify(postRequestedFor(urlEqualTo("/api/v1/push")));
         verify(postRequestedFor(urlEqualTo("/api/v1/sms")));
+    }
+
+    @Test
+    @DisplayName("Should return 429 Too Many Requests when rate limit threshold is exceeded")
+    void shouldEnforceRateLimit() throws Exception {
+        String customerId = "cus_rate_limit_test";
+        for (int i = 0; i < 10; i++) {
+            IngestEventRequest request = new IngestEventRequest(
+                    EventType.TRANSFER_COMPLETED,
+                    customerId,
+                    Instant.now(),
+                    "en",
+                    Map.of("amount", "10.00", "currency", "USD", "accountLast4", "1111")
+            );
+            mockMvc.perform(post("/api/v1/events")
+                            .header("Authorization", "Bearer " + validJwtToken)
+                            .header("Idempotency-Key", "rate-key-" + i)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isAccepted());
+        }
+
+        // 11th request exceeds standard limit (10/hr)
+        IngestEventRequest excessRequest = new IngestEventRequest(
+                EventType.TRANSFER_COMPLETED,
+                customerId,
+                Instant.now(),
+                "en",
+                Map.of("amount", "10.00", "currency", "USD", "accountLast4", "1111")
+        );
+        mockMvc.perform(post("/api/v1/events")
+                        .header("Authorization", "Bearer " + validJwtToken)
+                        .header("Idempotency-Key", "rate-key-11")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(excessRequest)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().exists("Retry-After"))
+                .andExpect(jsonPath("$.title", is("Rate Limit Exceeded")));
     }
 
     @Test

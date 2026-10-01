@@ -98,6 +98,27 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(problemDetail);
     }
 
+    @ExceptionHandler(io.github.andres.pigeon.domain.exception.RateLimitExceededException.class)
+    public ResponseEntity<ProblemDetail> handleRateLimit(io.github.andres.pigeon.domain.exception.RateLimitExceededException ex) {
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
+        problemDetail.setType(URI.create("https://pigeon.bank.internal/errors/rate-limit-exceeded"));
+        problemDetail.setTitle("Rate Limit Exceeded");
+        problemDetail.setProperty("timestamp", Instant.now());
+        problemDetail.setProperty("retryAfterSeconds", ex.getRetryAfterSeconds());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))
+                .body(problemDetail);
+    }
+
+    @ExceptionHandler(io.github.andres.pigeon.domain.exception.CustomerOptedOutException.class)
+    public ResponseEntity<ProblemDetail> handleCustomerOptedOut(io.github.andres.pigeon.domain.exception.CustomerOptedOutException ex) {
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+        problemDetail.setType(URI.create("https://pigeon.bank.internal/errors/customer-opted-out"));
+        problemDetail.setTitle("Customer Opted Out");
+        problemDetail.setProperty("timestamp", Instant.now());
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(problemDetail);
+    }
+
     @ExceptionHandler(DomainException.class)
     public ResponseEntity<ProblemDetail> handleDomainException(DomainException ex) {
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());

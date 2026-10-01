@@ -4,13 +4,20 @@ import io.github.andres.pigeon.application.port.in.IngestEventCommand;
 import io.github.andres.pigeon.application.port.in.IngestEventUseCase;
 import io.github.andres.pigeon.application.port.out.AuditLogPort;
 import io.github.andres.pigeon.application.port.out.ClockPort;
+import io.github.andres.pigeon.application.port.out.CustomerPreferenceRepository;
 import io.github.andres.pigeon.application.port.out.IdempotencyStore;
 import io.github.andres.pigeon.application.port.out.NotificationRepository;
 import io.github.andres.pigeon.application.port.out.OutboxRepository;
+import io.github.andres.pigeon.application.port.out.RateLimiterPort;
+import io.github.andres.pigeon.domain.enums.FailureReason;
 import io.github.andres.pigeon.domain.enums.NotificationStatus;
 import io.github.andres.pigeon.domain.exception.DuplicateEventException;
+import io.github.andres.pigeon.domain.exception.RateLimitExceededException;
 import io.github.andres.pigeon.domain.model.AuditRecord;
+import io.github.andres.pigeon.domain.model.CustomerPreference;
 import io.github.andres.pigeon.domain.model.Notification;
+import io.github.andres.pigeon.domain.policy.MandatoryMessagePolicy;
+import io.github.andres.pigeon.domain.policy.QuietHoursPolicy;
 import io.github.andres.pigeon.domain.vo.CustomerId;
 import io.github.andres.pigeon.domain.vo.IdempotencyKey;
 import org.springframework.stereotype.Service;
@@ -30,19 +37,25 @@ public class IngestEventService implements IngestEventUseCase {
     private final AuditLogPort auditLogPort;
     private final ClockPort clockPort;
     private final IdempotencyStore idempotencyStore;
+    private final RateLimiterPort rateLimiterPort;
+    private final CustomerPreferenceRepository customerPreferenceRepository;
 
     public IngestEventService(
             NotificationRepository notificationRepository,
             OutboxRepository outboxRepository,
             AuditLogPort auditLogPort,
             ClockPort clockPort,
-            IdempotencyStore idempotencyStore
+            IdempotencyStore idempotencyStore,
+            RateLimiterPort rateLimiterPort,
+            CustomerPreferenceRepository customerPreferenceRepository
     ) {
         this.notificationRepository = notificationRepository;
         this.outboxRepository = outboxRepository;
         this.auditLogPort = auditLogPort;
         this.clockPort = clockPort;
         this.idempotencyStore = idempotencyStore;
+        this.rateLimiterPort = rateLimiterPort;
+        this.customerPreferenceRepository = customerPreferenceRepository;
     }
 
     @Override
@@ -58,10 +71,17 @@ public class IngestEventService implements IngestEventUseCase {
         );
 
         if (acquisition.result() == IdempotencyStore.LockResult.EXISTS) {
+            // Replay from fast path does not consume rate limit quota
             return resolveExisting(command, key, acquisition.existing().orElse(null));
         }
 
-        // 2. Either ACQUIRED or STORE_UNAVAILABLE (Redis down): Proceed to DB insert
+        // 2. Rate Limiting Check (runs only on non-replay requests)
+        if (!rateLimiterPort.isAllowed(command.customerId(), command.eventType())) {
+            idempotencyStore.evict(command.clientId(), key);
+            throw new RateLimitExceededException("Rate limit exceeded for customer " + command.customerId(), 60L);
+        }
+
+        // 3. Either ACQUIRED or STORE_UNAVAILABLE (Redis down): Proceed to DB insert
         try {
             return createAndSaveNotification(command, key);
         } catch (Exception ex) {
@@ -164,6 +184,80 @@ public class IngestEventService implements IngestEventUseCase {
         }
 
         Instant now = clockPort.now();
+        boolean isMandatory = MandatoryMessagePolicy.isMandatory(command.eventType());
+
+        if (!isMandatory) {
+            CustomerPreference preference = customerPreferenceRepository
+                    .findByCustomerId(CustomerId.of(command.customerId()))
+                    .orElse(CustomerPreference.defaultPreference(CustomerId.of(command.customerId()), now));
+
+            // Check opt-out
+            if (preference.isOptedOut(command.eventType())) {
+                Notification suppressed = Notification.createFailed(
+                        command.clientId(),
+                        key,
+                        command.payloadHash(),
+                        CustomerId.of(command.customerId()),
+                        command.eventType(),
+                        command.locale(),
+                        FailureReason.SUPPRESSED_OPT_OUT,
+                        command.data(),
+                        now
+                );
+                Notification saved = notificationRepository.save(suppressed);
+
+                AuditRecord audit = AuditRecord.create(
+                        saved.getId(),
+                        command.customerId(),
+                        command.clientId(),
+                        "NOTIFICATION_SUPPRESSED",
+                        null,
+                        NotificationStatus.FAILED,
+                        null,
+                        "Suppressed due to customer opt-out for category " + command.eventType().name(),
+                        null,
+                        now
+                );
+                auditLogPort.append(audit);
+                idempotencyStore.save(command.clientId(), key, saved.getPayloadHash(), saved.getId(), IDEMPOTENCY_TTL);
+                return new IngestEventCommand.IngestResult(saved.getId(), "FAILED", saved.getPriority(), false);
+            }
+
+            // Check Quiet Hours
+            if (preference.isQuietHoursEnabled() && QuietHoursPolicy.isQuietHour(now, preference.getTimeZone())) {
+                Instant resumeAt = QuietHoursPolicy.calculateResumeInstant(now, preference.getTimeZone());
+                Notification deferred = Notification.createDeferred(
+                        command.clientId(),
+                        key,
+                        command.payloadHash(),
+                        CustomerId.of(command.customerId()),
+                        command.eventType(),
+                        command.locale(),
+                        command.data(),
+                        resumeAt,
+                        now
+                );
+                Notification saved = notificationRepository.save(deferred);
+
+                AuditRecord audit = AuditRecord.create(
+                        saved.getId(),
+                        command.customerId(),
+                        command.clientId(),
+                        "NOTIFICATION_DEFERRED",
+                        null,
+                        NotificationStatus.DEFERRED,
+                        null,
+                        "Deferred during quiet hours until " + resumeAt,
+                        null,
+                        now
+                );
+                auditLogPort.append(audit);
+                idempotencyStore.save(command.clientId(), key, saved.getPayloadHash(), saved.getId(), IDEMPOTENCY_TTL);
+                return new IngestEventCommand.IngestResult(saved.getId(), "DEFERRED", saved.getPriority(), false);
+            }
+        }
+
+        // Standard or Mandatory delivery
         Notification notification = Notification.createPending(
                 command.clientId(),
                 key,

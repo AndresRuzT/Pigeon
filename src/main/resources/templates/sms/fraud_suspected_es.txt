@@ -1,0 +1,1 @@
+Alerta Pigeon: Transaccion sospechosa de [(${amount})] [(${currency})] en [(${merchantName})] con tarjeta *[(${cardLast4})]. Contactenos de inmediato.

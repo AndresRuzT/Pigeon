@@ -39,4 +39,11 @@ public class PostgresNotificationRepository implements NotificationRepository {
         return repository.findByClientIdAndIdempotencyKey(clientId, key.value())
                 .map(mapper::toDomain);
     }
+
+    @Override
+    public java.util.List<Notification> findDueDeferred(java.time.Instant now, int limit) {
+        return repository.findDueDeferred(now, limit).stream()
+                .map(mapper::toDomain)
+                .collect(java.util.stream.Collectors.toList());
+    }
 }

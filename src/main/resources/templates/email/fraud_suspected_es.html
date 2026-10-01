@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Alerta Urgente de Seguridad</title>
+</head>
+<body style="font-family: Arial, sans-serif; background-color: #f4f6f8; margin: 0; padding: 20px;">
+    <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 8px;">
+        <h2 style="color: #b91c1c;">Banco Pigeon - Alerta de Posible Fraude</h2>
+        <p>Se ha detectado una transacción sospechosa en su tarjeta terminada en <strong th:text="${cardLast4}">****</strong>.</p>
+        <p>Monto: <strong th:text="${amount}">0.00</strong> <span th:text="${currency}">USD</span></p>
+        <p>Comercio: <strong th:text="${merchantName}">Comercio Desconocido</strong></p>
+        <p style="color: #b91c1c; font-weight: bold;">Si no reconoce este movimiento, bloquee su tarjeta inmediatamente en la app móvil.</p>
+    </div>
+</body>
+</html>

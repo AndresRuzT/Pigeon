@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Purchase Declined</title>
+</head>
+<body style="font-family: Arial, sans-serif; background-color: #f4f6f8; margin: 0; padding: 20px;">
+    <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 8px;">
+        <h2 style="color: #b45309;">Pigeon Bank - Purchase Declined</h2>
+        <p>A purchase attempt on card ending in <strong th:text="${cardLast4}">****</strong> was declined.</p>
+        <p>Amount: <strong th:text="${amount}">0.00</strong> <span th:text="${currency}">USD</span></p>
+        <p>Merchant: <strong th:text="${merchantName}">Merchant</strong></p>
+        <p>Reason: <strong th:text="${reasonCode} ?: 'INSUFFICIENT_FUNDS'">Reason</strong></p>
+    </div>
+</body>
+</html>

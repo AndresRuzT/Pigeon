@@ -112,6 +112,104 @@ public class Notification {
         );
     }
 
+    public static Notification createDeferred(
+            String clientId,
+            IdempotencyKey idempotencyKey,
+            String payloadHash,
+            CustomerId customerId,
+            EventType eventType,
+            String locale,
+            Map<String, Object> data,
+            Instant scheduledAt,
+            Instant now
+    ) {
+        UUID newId = UUID.randomUUID();
+        Priority determinedPriority = PriorityPolicy.determinePriority(eventType);
+        return new Notification(
+                newId,
+                clientId,
+                idempotencyKey,
+                payloadHash,
+                customerId,
+                eventType,
+                determinedPriority,
+                locale,
+                NotificationStatus.DEFERRED,
+                null,
+                null,
+                null,
+                data,
+                scheduledAt,
+                now,
+                now,
+                null,
+                new ArrayList<>()
+        );
+    }
+
+    public static Notification createFailed(
+            String clientId,
+            IdempotencyKey idempotencyKey,
+            String payloadHash,
+            CustomerId customerId,
+            EventType eventType,
+            String locale,
+            FailureReason failureReason,
+            Map<String, Object> data,
+            Instant now
+    ) {
+        UUID newId = UUID.randomUUID();
+        Priority determinedPriority = PriorityPolicy.determinePriority(eventType);
+        return new Notification(
+                newId,
+                clientId,
+                idempotencyKey,
+                payloadHash,
+                customerId,
+                eventType,
+                determinedPriority,
+                locale,
+                NotificationStatus.FAILED,
+                failureReason,
+                null,
+                null,
+                data,
+                null,
+                now,
+                now,
+                null,
+                new ArrayList<>()
+        );
+    }
+
+    public AuditRecord markPendingFromDeferred(String actor, String correlationId, Instant now) {
+        assertNotTerminal();
+        if (this.status != NotificationStatus.DEFERRED) {
+            throw new InvalidStateTransitionException(this.status, NotificationStatus.PENDING);
+        }
+        NotificationStatus previousStatus = this.status;
+        this.status = NotificationStatus.PENDING;
+        this.updatedAt = now;
+
+        return AuditRecord.create(
+                this.id,
+                this.customerId.value(),
+                actor != null ? actor : "system",
+                "NOTIFICATION_RESUMED",
+                previousStatus,
+                NotificationStatus.PENDING,
+                null,
+                "Quiet hours ended, notification resumed for delivery",
+                correlationId,
+                now
+        );
+    }
+
+    public void setTemplateDetails(String templateId, String templateVersion) {
+        this.templateId = templateId;
+        this.templateVersion = templateVersion;
+    }
+
     public AuditRecord markSent(Channel channel, String providerRef, long latencyMs, String actor, String correlationId, Instant now) {
         assertNotTerminal();
         if (this.status != NotificationStatus.PENDING) {

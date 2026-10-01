@@ -1,0 +1,2 @@
+Security Alert
+Suspicious transaction of [(${amount})] [(${currency})] on card *[(${cardLast4})]. Open app to review.

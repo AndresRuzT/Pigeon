@@ -1,0 +1,2 @@
+Recordatorio de Pago
+Pago de [(${amount})] [(${currency})] vence el [(${dueDate})] para cuenta *[(${accountLast4})].

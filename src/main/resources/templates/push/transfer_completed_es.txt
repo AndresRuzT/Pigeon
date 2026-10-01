@@ -1,0 +1,2 @@
+Transferencia Exitosa
+Transferencia de [(${amount})] [(${currency})] a [(${beneficiaryName})] realizada con exito.

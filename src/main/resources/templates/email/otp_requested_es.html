@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Código de Seguridad</title>
+</head>
+<body style="font-family: Arial, sans-serif; background-color: #f4f6f8; margin: 0; padding: 20px;">
+    <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 8px;">
+        <h2 style="color: #1e3a8a;">Banco Pigeon - Código de Verificación</h2>
+        <p>Tu código de seguridad temporal es:</p>
+        <div style="font-size: 28px; font-weight: bold; letter-spacing: 4px; color: #1e40af; padding: 15px 0;" th:text="${otpCode}">000000</div>
+        <p>Este código expira en <span th:text="${expiresInSeconds} ?: '300'">300</span> segundos.</p>
+        <p style="font-size: 12px; color: #6b7280;">Si no solicitaste este código, por favor contacta a seguridad bancaria de inmediato.</p>
+    </div>
+</body>
+</html>

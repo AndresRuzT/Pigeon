@@ -1,0 +1,2 @@
+Transfer Completed
+Transfer of [(${amount})] [(${currency})] to [(${beneficiaryName})] was successful.

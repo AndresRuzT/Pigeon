@@ -1,0 +1,2 @@
+Purchase Declined
+Purchase of [(${amount})] [(${currency})] at [(${merchantName})] declined on card *[(${cardLast4})].

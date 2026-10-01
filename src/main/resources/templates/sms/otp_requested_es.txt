@@ -1,0 +1,1 @@
+Banco Pigeon: Tu codigo de seguridad es [(${otpCode})]. Expira en [(${expiresInSeconds} ?: '300')]s. No lo compartas.

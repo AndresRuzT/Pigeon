@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Transferencia Exitosa</title>
+</head>
+<body style="font-family: Arial, sans-serif; background-color: #f4f6f8; margin: 0; padding: 20px;">
+    <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 8px;">
+        <h2 style="color: #1e3a8a;">Banco Pigeon - Confirmación de Transferencia</h2>
+        <p>Su transferencia ha sido procesada con éxito.</p>
+        <p>Monto: <strong th:text="${amount}">0.00</strong> <span th:text="${currency}">USD</span></p>
+        <p>Cuenta de origen: terminada en <strong th:text="${accountLast4}">****</strong></p>
+        <p>Beneficiario: <strong th:text="${beneficiaryName}">Beneficiario</strong></p>
+    </div>
+</body>
+</html>

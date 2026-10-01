@@ -1,0 +1,1 @@
+Pigeon Bank: Transfer of [(${amount})] [(${currency})] to [(${beneficiaryName})] completed from account *[(${accountLast4})].

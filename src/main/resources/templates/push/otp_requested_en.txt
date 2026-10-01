@@ -1,0 +1,2 @@
+Security Code
+Your verification code is [(${otpCode})]. Expires in [(${expiresInSeconds} ?: '300')]s.

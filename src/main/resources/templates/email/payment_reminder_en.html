@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Payment Reminder</title>
+</head>
+<body style="font-family: Arial, sans-serif; background-color: #f4f6f8; margin: 0; padding: 20px;">
+    <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 8px;">
+        <h2 style="color: #1e3a8a;">Pigeon Bank - Payment Reminder</h2>
+        <p>This is a reminder of an upcoming payment on account ending in <strong th:text="${accountLast4}">****</strong>.</p>
+        <p>Amount Due: <strong th:text="${amount}">0.00</strong> <span th:text="${currency}">USD</span></p>
+        <p>Due Date: <strong th:text="${dueDate}">2026-10-15</strong></p>
+    </div>
+</body>
+</html>

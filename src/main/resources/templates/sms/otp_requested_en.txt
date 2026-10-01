@@ -1,0 +1,1 @@
+Pigeon Bank: Your security code is [(${otpCode})]. Expires in [(${expiresInSeconds} ?: '300')]s. Do not share.

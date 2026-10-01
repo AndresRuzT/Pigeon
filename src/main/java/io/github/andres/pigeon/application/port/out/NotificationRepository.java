@@ -10,4 +10,5 @@ public interface NotificationRepository {
     Notification save(Notification notification);
     Optional<Notification> findById(UUID id);
     Optional<Notification> findByClientIdAndIdempotencyKey(String clientId, IdempotencyKey key);
+    java.util.List<Notification> findDueDeferred(java.time.Instant now, int limit);
 }

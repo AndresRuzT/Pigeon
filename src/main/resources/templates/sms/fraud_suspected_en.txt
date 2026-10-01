@@ -1,0 +1,1 @@
+Pigeon Alert: Suspicious transaction of [(${amount})] [(${currency})] at [(${merchantName})] on card *[(${cardLast4})]. Contact us immediately.

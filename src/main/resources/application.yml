@@ -74,6 +74,36 @@ pigeon:
   outbox:
     poll-interval-ms: 500
 
+resilience4j:
+  circuitbreaker:
+    instances:
+      sms:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+      push:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+  retry:
+    instances:
+      sms:
+        max-attempts: 3
+        wait-duration: 200ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        ignore-exceptions:
+          - org.springframework.web.client.HttpClientErrorException
+      push:
+        max-attempts: 3
+        wait-duration: 200ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        ignore-exceptions:
+          - org.springframework.web.client.HttpClientErrorException
+
 springdoc:
   api-docs:
     path: /v3/api-docs

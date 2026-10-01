@@ -1,0 +1,2 @@
+Payment Reminder
+Payment of [(${amount})] [(${currency})] due on [(${dueDate})] for account *[(${accountLast4})].

@@ -79,9 +79,9 @@ Pigeon is a **backend-only** project. There is no custom frontend. Everything ca
 
 | Item | Value |
 |---|---|
-| Current phase | **Phase 1** (assumed, confirm before starting) |
+| Current phase | **Phase 3 complete** (Ready for Phase 4) |
 | Latest release | none |
-| Next milestone | Phase 1 definition of done (see [section 19](#19-development-phases-and-definition-of-done)) |
+| Next milestone | Phase 4 definition of done (see [section 19](#19-development-phases-and-definition-of-done)) |
 
 ### 2.2 Decisions taken
 
@@ -94,13 +94,18 @@ Pigeon is a **backend-only** project. There is no custom frontend. Everything ca
 | D-05 | Architecture: **hexagonal** (domain, application, infrastructure) | Confirmed | Enforced with ArchUnit (ADR-0001) |
 | D-06 | Language policy | Confirmed | Documentation and code in English; explanations to the maintainer in Spanish |
 | D-07 | Local JWT issuer | Confirmed | Dev/test RSA-2048 key pair with dev-token.sh; service validates as OAuth2 Resource Server (ADR-0005) |
-| D-08 | Notification status model | Confirmed | 4 canonical statuses (PENDING, SENT, DELIVERED, FAILED) with failure_reason codes (ADR-0007) |
+| D-08 | Notification status model | Confirmed | 5 canonical statuses (PENDING, SENT, DELIVERED, FAILED, DEFERRED) with failure_reason codes (ADR-0007) |
 | D-09 | Event priority defaults | Confirmed | OTP and Fraud are HIGH; Transfer, Declined Purchase and Reminder default to LOW |
 | D-10 | Maven structure | Confirmed | Single module, strict boundaries enforced by ArchUnit (ADR-0001) |
 | D-11 | Base package and Maven coordinates | Confirmed | `io.github.andres.pigeon` |
 | D-12 | Outbox pulled forward to Phase 1 | Confirmed | `outbox_event` and relay in Phase 1 eliminate dual-write risk R-01 from day one (ADR-0004) |
 | D-13 | Contact resolution in Phase 1 | Confirmed | `customer_contact` included in V1 Flyway with synthetic demo fixtures to cleanly resolve recipients |
 | D-14 | Sensitive data boundary validation | Confirmed | Luhn validation (13-19 digits) and account run detection (>=10 digits) returning 400 Problem Details (ADR-0006) |
+| D-15 | Two-tier retry ladder and DLQ topology | Confirmed | In-process Resilience4j + TTL-based RabbitMQ retry ladder for LOW priority, non-blocking poison message DLQ (ADR-0008, ADR-0009) |
+| D-16 | Multilingual versioned templates with SSTI prevention | Confirmed | Strict per-event variable allowlists, HTML escaping (`th:text`), no `th:utext`, `en`/`es` locales (ADR-0010) |
+| D-17 | Customer preferences and quiet hours policy | Confirmed | Non-business hours (before 08:00, at/after 18:00 Mon-Fri, all weekends) deferred to next business day 08:00; security events exempt (ADR-0011) |
+| D-18 | Push channel and full cascade fallback | Confirmed | `PUSH → SMS → EMAIL` fallback cascade with Resilience4j circuit breakers and retries (ADR-0012) |
+| D-19 | Sliding-window Redis rate limiting | Confirmed | Dual-bucket (OTP 5/10m, standard 10/1h) with fail-open semantics and replay bypass (ADR-0012) |
 
 ### 2.3 Open decisions
 
@@ -472,11 +477,12 @@ Two tiers, chosen to avoid blocking consumer threads for long periods:
 
 - **Behavior.** Each customer has allowed channels, a channel order, a time zone, a quiet-hours window and opt-out flags per category.
 - **Rules.**
-  - Mandatory security messages (`OTP_REQUESTED`, `FRAUD_SUSPECTED`) ignore opt-out, allowed-channel restrictions of non-security nature and quiet hours.
-  - Default quiet hours: 22:00 to 07:00 in the customer's time zone, applied to `LOW` messages only.
-  - A quiet-hours message is **deferred, not dropped**: it is stored with `scheduled_at` and picked up by a scheduler (`FOR UPDATE SKIP LOCKED`). Messages deferred beyond a maximum age (default 24 h) fail with `EXPIRED`.
-  - Opt-out produces `FAILED` with reason `SUPPRESSED_OPT_OUT` (see O-02).
-- **Acceptance.** *Given* a customer in quiet hours, *then* a `PAYMENT_REMINDER` is deferred but an `OTP_REQUESTED` is sent immediately.
+  - Mandatory security messages (`OTP_REQUESTED`, `FRAUD_SUSPECTED`) ignore opt-out, allowed-channel restrictions of non-security nature and quiet hours (delivered 24/7).
+  - Quiet hours strictly encompass all hours outside normal business hours: outside 08:00 to 18:00 Monday through Friday, plus all 24 hours of Saturday and Sunday in the customer's time zone (defaulting to America/Bogota or UTC).
+  - A quiet-hours non-security message is **deferred, not dropped**: it is stored with status `DEFERRED` and `scheduled_at` set to 08:00 on the next business day (Monday through Friday).
+  - A background scheduler (`DeferredNotificationScheduler`) periodically polls due deferred notifications using `SELECT ... FOR UPDATE SKIP LOCKED` and transitions them back to `PENDING` to trigger delivery orchestration.
+  - Opt-out produces `FAILED` with reason `SUPPRESSED_OPT_OUT` (or returns RFC 7807/9457 Problem Details `422 Unprocessable Entity` with type `customer-opted-out` on synchronous ingestion).
+- **Acceptance.** *Given* a customer in quiet hours (e.g. 19:30 or Saturday), *then* a `PAYMENT_REMINDER` is deferred until next business day 08:00 but an `OTP_REQUESTED` is sent immediately.
 
 ### FR-08 Templates (Phase 3)
 
@@ -557,14 +563,14 @@ See [section 14](#14-observability).
 
 ## 11. Data model
 
-All tables are managed with **Flyway** (`V1__...`, `V2__...`). Identifiers are UUIDs; timestamps are `timestamptz` in UTC. Flyway `V1` introduces `notification`, `delivery_attempt`, `outbox_event`, `customer_contact` (with synthetic seed demo data) and `audit_log` (with trigger immutability protection); later phases add `customer_preference` and `notification_template`.
+All tables are managed with **Flyway** (`V1__...`, `V2__...`). Identifiers are UUIDs; timestamps are `timestamptz` in UTC. Flyway `V1` introduces `notification`, `delivery_attempt`, `outbox_event`, `customer_contact` (with synthetic seed demo data) and `audit_log` (with trigger immutability protection); Flyway `V2` introduces `customer_preference` (with quiet hours preferences and a partial index on `notification(status, scheduled_at) WHERE status = 'DEFERRED'`).
 
 | Table | Key columns | Notes |
 |---|---|---|
 | `notification` | `id`, `client_id`, `idempotency_key`, `payload_hash`, `customer_id`, `event_type`, `priority`, `locale`, `status`, `failure_reason`, `template_id`, `template_version`, `data` (jsonb, sanitized), `scheduled_at`, `created_at`, `updated_at`, `version` | Unique `(client_id, idempotency_key)`; optimistic locking via `version` |
 | `delivery_attempt` | `id`, `notification_id`, `channel`, `attempt_no`, `outcome`, `provider_ref`, `error_code`, `latency_ms`, `created_at` | Append-only; unique `(notification_id, channel, attempt_no)` |
-| `notification_template` | `id`, `event_type`, `channel`, `locale`, `version`, `status` (`DRAFT`, `ACTIVE`, `DEPRECATED`), `subject`, `body`, `allowed_variables`, `created_at` | Unique `(event_type, channel, locale, version)` (Phase 3) |
-| `customer_preference` | `customer_id`, `allowed_channels`, `channel_order`, `time_zone`, `quiet_start`, `quiet_end`, `opt_out_categories`, `updated_at` | Mandatory security messages ignore these (Phase 3) |
+| `notification_template` | `id`, `event_type`, `channel`, `locale`, `version`, `status` (`DRAFT`, `ACTIVE`, `DEPRECATED`), `subject`, `body`, `allowed_variables`, `created_at` | Unique `(event_type, channel, locale, version)` (Phase 3 filesystem templates) |
+| `customer_preference` | `customer_id`, `allowed_channels`, `preferred_channel_order`, `opt_out_categories`, `time_zone`, `quiet_hours_enabled`, `created_at`, `updated_at` | Mandatory security messages ignore these (Phase 3, Flyway V2) |
 | `customer_contact` | `customer_id`, `email`, `phone`, `push_token` | **Synthetic demo data only** (`example.com` addresses, fictional phone numbers) |
 | `outbox_event` | `id`, `aggregate_id`, `event_type`, `routing_key`, `payload` (jsonb), `created_at`, `published_at`, `publish_attempts` | Partial index on `published_at IS NULL` |
 | `audit_log` | `id`, `occurred_at`, `notification_id`, `customer_id`, `actor`, `action`, `from_status`, `to_status`, `channel`, `template_version`, `reason`, `correlation_id`, `prev_hash` (stretch) | Insert-only; trigger blocks `UPDATE` and `DELETE` |
@@ -631,6 +637,7 @@ Content-Type: application/json
 | Missing or invalid token | `401` | `unauthorized` |
 | Missing scope | `403` | `forbidden` |
 | Same key, different payload | `409` | `idempotency-key-conflict` |
+| Customer opted out | `422` | `customer-opted-out` |
 | Rate limit exceeded | `429` + `Retry-After` | `rate-limit-exceeded` |
 | Unexpected error | `500` (no internal details) | `internal-error` |
 
@@ -831,11 +838,11 @@ Work is done **one phase at a time**. A phase is complete only when every item i
 
 ### Phase 3: templates, preferences, priorities
 
-- [ ] Thymeleaf templates, versioning, locales, safe variables
-- [ ] Preferences and contacts; quiet hours with deferral scheduler
-- [ ] High and low priority queues with TTL and `pigeon.expired` handling
-- [ ] Push channel; full `PUSH → SMS → EMAIL` fallback
-- [ ] Per-customer rate limiting (standard and OTP buckets)
+- [x] Thymeleaf templates, versioning, locales, safe variables
+- [x] Preferences and contacts; quiet hours with deferral scheduler
+- [x] High and low priority queues with TTL and `pigeon.expired` handling
+- [x] Push channel; full `PUSH → SMS → EMAIL` fallback
+- [x] Per-customer rate limiting (standard and OTP buckets)
 
 ### Phase 4: outbox, audit, metrics, dashboard
 
@@ -870,7 +877,7 @@ pigeon/
 │   ├── workflows/ci.yml
 │   └── dependabot.yml
 ├── docs/
-│   ├── adr/                  Architecture Decision Records
+│   ├── adr/                  Architecture Decision Records (ADR-0001 through ADR-0012)
 │   ├── api/openapi.yaml
 │   ├── assets/               Logos, screenshots, GIFs
 │   ├── data-model.md
@@ -889,7 +896,19 @@ pigeon/
     └── test/java/...
 ```
 
-**Planned ADRs:** record architecture decisions; RabbitMQ as broker; hexagonal architecture; idempotency strategy (Redis plus database); Outbox over CDC; retry tiers and queue topology; priority queue design; template engine and injection safety; fallback channels and OTP trade-offs; local JWT strategy.
+**Recorded ADRs:**
+- [`ADR-0001`](docs/adr/0001-hexagonal-architecture.md): Hexagonal architecture and dependency rule enforcement with ArchUnit
+- [`ADR-0002`](docs/adr/0002-rabbitmq-as-message-broker.md): RabbitMQ topology, priority queues, and dead-lettering
+- [`ADR-0003`](docs/adr/0003-idempotency-strategy.md): Dual-tier idempotency strategy with Redis and PostgreSQL source of truth
+- [`ADR-0004`](docs/adr/0004-transactional-outbox-pattern.md): Transactional outbox pattern over CDC for zero dual-write message loss
+- [`ADR-0005`](docs/adr/0005-local-jwt-and-oauth2-security.md): RSA-2048 local JWT issuer and OAuth2 resource server validation
+- [`ADR-0006`](docs/adr/0006-boundary-validation-and-sensitive-data-masking.md): Boundary PAN & account masking and Luhn rejection
+- [`ADR-0007`](docs/adr/0007-notification-status-lifecycle-and-failure-reasons.md): Notification status lifecycle with granular failure reasons
+- [`ADR-0008`](docs/adr/0008-resilience4j-circuit-breaker-retry-timeouts.md): In-process Resilience4j fault tolerance and isolation per channel
+- [`ADR-0009`](docs/adr/0009-two-tier-retry-ladder-and-dlq.md): Two-tier delayed retry ladder and poison message DLQ handling
+- [`ADR-0010`](docs/adr/0010-templates-versioning-and-safe-variables.md): Multilingual template versioning and strict anti-SSTI variable safety
+- [`ADR-0011`](docs/adr/0011-customer-preferences-and-quiet-hours-policy.md): Customer preferences, non-business quiet hours deferral, and security exemption
+- [`ADR-0012`](docs/adr/0012-push-channel-and-redis-sliding-window-rate-limiting.md): Push notification channel and Redis dual-bucket sliding-window rate limiting
 
 ---
 

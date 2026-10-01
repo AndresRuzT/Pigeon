@@ -1,0 +1,1 @@
+Banco Pigeon: Transferencia de [(${amount})] [(${currency})] a [(${beneficiaryName})] completada desde cuenta *[(${accountLast4})].

@@ -1,0 +1,2 @@
+Alerta de Seguridad
+Transaccion sospechosa de [(${amount})] [(${currency})] con tarjeta *[(${cardLast4})]. Abre la app para revisar.

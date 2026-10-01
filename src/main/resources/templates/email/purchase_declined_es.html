@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Compra Declinada</title>
+</head>
+<body style="font-family: Arial, sans-serif; background-color: #f4f6f8; margin: 0; padding: 20px;">
+    <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 8px;">
+        <h2 style="color: #b45309;">Banco Pigeon - Intento de Compra Rechazado</h2>
+        <p>Un intento de compra con su tarjeta terminada en <strong th:text="${cardLast4}">****</strong> fue rechazado.</p>
+        <p>Monto: <strong th:text="${amount}">0.00</strong> <span th:text="${currency}">USD</span></p>
+        <p>Comercio: <strong th:text="${merchantName}">Comercio</strong></p>
+        <p>Motivo: <strong th:text="${reasonCode} ?: 'FONDOS_INSUFICIENTES'">Motivo</strong></p>
+    </div>
+</body>
+</html>

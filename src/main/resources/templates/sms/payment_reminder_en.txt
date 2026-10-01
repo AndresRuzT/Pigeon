@@ -1,0 +1,1 @@
+Pigeon Bank: Payment reminder of [(${amount})] [(${currency})] due on [(${dueDate})] for account *[(${accountLast4})].

@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Recordatorio de Pago</title>
+</head>
+<body style="font-family: Arial, sans-serif; background-color: #f4f6f8; margin: 0; padding: 20px;">
+    <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 8px;">
+        <h2 style="color: #1e3a8a;">Banco Pigeon - Recordatorio de Pago</h2>
+        <p>Le recordamos el próximo vencimiento de pago para su cuenta terminada en <strong th:text="${accountLast4}">****</strong>.</p>
+        <p>Monto a pagar: <strong th:text="${amount}">0.00</strong> <span th:text="${currency}">USD</span></p>
+        <p>Fecha límite: <strong th:text="${dueDate}">2026-10-15</strong></p>
+    </div>
+</body>
+</html>
