@@ -3,6 +3,7 @@ package io.github.andres.pigeon.application;
 import io.github.andres.pigeon.application.port.in.IngestEventCommand;
 import io.github.andres.pigeon.application.port.out.AuditLogPort;
 import io.github.andres.pigeon.application.port.out.ClockPort;
+import io.github.andres.pigeon.application.port.out.IdempotencyStore;
 import io.github.andres.pigeon.application.port.out.NotificationRepository;
 import io.github.andres.pigeon.application.port.out.OutboxRepository;
 import io.github.andres.pigeon.application.service.IngestEventService;
@@ -16,13 +17,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -46,6 +47,9 @@ class IngestEventServiceTest {
     @Mock
     private ClockPort clockPort;
 
+    @Mock
+    private IdempotencyStore idempotencyStore;
+
     private IngestEventService service;
     private Instant now;
 
@@ -53,7 +57,9 @@ class IngestEventServiceTest {
     void setUp() {
         now = Instant.parse("2026-10-01T12:00:00Z");
         org.mockito.Mockito.lenient().when(clockPort.now()).thenReturn(now);
-        service = new IngestEventService(notificationRepository, outboxRepository, auditLogPort, clockPort);
+        org.mockito.Mockito.lenient().when(idempotencyStore.acquireOrFind(any(), any(), any(), any()))
+                .thenReturn(new IdempotencyStore.AcquisitionResult(IdempotencyStore.LockResult.ACQUIRED, Optional.empty()));
+        service = new IngestEventService(notificationRepository, outboxRepository, auditLogPort, clockPort, idempotencyStore);
     }
 
     @Test
@@ -152,4 +158,70 @@ class IngestEventServiceTest {
                 .isInstanceOf(DuplicateEventException.class)
                 .hasMessageContaining("already been used with a different payload");
     }
+
+    @Test
+    @DisplayName("Should replay immediately from Redis fast-path when key and hash match")
+    void shouldReplayFromRedisFastPath() {
+        UUID notificationId = UUID.randomUUID();
+        when(idempotencyStore.acquireOrFind(eq("client-bank"), eq(IdempotencyKey.of("key-fast")), any(), any()))
+                .thenReturn(new IdempotencyStore.AcquisitionResult(
+                        IdempotencyStore.LockResult.EXISTS,
+                        Optional.of(new IdempotencyStore.StoredIdempotency("hash-fast", notificationId))
+                ));
+
+        Notification existing = Notification.createPending(
+                "client-bank",
+                IdempotencyKey.of("key-fast"),
+                "hash-fast",
+                CustomerId.of("cus_8F2A91"),
+                EventType.TRANSFER_COMPLETED,
+                "en",
+                Map.of(),
+                now
+        );
+        when(notificationRepository.findById(notificationId)).thenReturn(Optional.of(existing));
+
+        IngestEventCommand command = new IngestEventCommand(
+                "client-bank",
+                "key-fast",
+                "hash-fast",
+                "cus_8F2A91",
+                EventType.TRANSFER_COMPLETED,
+                "en",
+                now,
+                Map.of()
+        );
+
+        IngestEventCommand.IngestResult result = service.ingest(command);
+
+        assertThat(result.notificationId()).isEqualTo(existing.getId());
+        assertThat(result.isReplay()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Should reject with 409 from Redis fast-path when key matches but hash differs")
+    void shouldRejectFromRedisWhenHashDiffers() {
+        UUID notificationId = UUID.randomUUID();
+        when(idempotencyStore.acquireOrFind(eq("client-bank"), eq(IdempotencyKey.of("key-fast")), any(), any()))
+                .thenReturn(new IdempotencyStore.AcquisitionResult(
+                        IdempotencyStore.LockResult.EXISTS,
+                        Optional.of(new IdempotencyStore.StoredIdempotency("hash-fast-1", notificationId))
+                ));
+
+        IngestEventCommand command = new IngestEventCommand(
+                "client-bank",
+                "key-fast",
+                "hash-fast-DIFFERENT",
+                "cus_8F2A91",
+                EventType.TRANSFER_COMPLETED,
+                "en",
+                now,
+                Map.of()
+        );
+
+        assertThatThrownBy(() -> service.ingest(command))
+                .isInstanceOf(DuplicateEventException.class)
+                .hasMessageContaining("already been used with a different payload");
+    }
 }
+

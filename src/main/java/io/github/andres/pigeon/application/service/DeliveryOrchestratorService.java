@@ -6,6 +6,7 @@ import io.github.andres.pigeon.application.port.out.ClockPort;
 import io.github.andres.pigeon.application.port.out.ContactRepository;
 import io.github.andres.pigeon.application.port.out.EmailSenderPort;
 import io.github.andres.pigeon.application.port.out.NotificationRepository;
+import io.github.andres.pigeon.application.port.out.SmsSenderPort;
 import io.github.andres.pigeon.domain.enums.Channel;
 import io.github.andres.pigeon.domain.enums.FailureReason;
 import io.github.andres.pigeon.domain.exception.NotificationNotFoundException;
@@ -29,6 +30,7 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
     private final NotificationRepository notificationRepository;
     private final ContactRepository contactRepository;
     private final EmailSenderPort emailSenderPort;
+    private final SmsSenderPort smsSenderPort;
     private final AuditLogPort auditLogPort;
     private final ClockPort clockPort;
 
@@ -36,12 +38,14 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
             NotificationRepository notificationRepository,
             ContactRepository contactRepository,
             EmailSenderPort emailSenderPort,
+            SmsSenderPort smsSenderPort,
             AuditLogPort auditLogPort,
             ClockPort clockPort
     ) {
         this.notificationRepository = notificationRepository;
         this.contactRepository = contactRepository;
         this.emailSenderPort = emailSenderPort;
+        this.smsSenderPort = smsSenderPort;
         this.auditLogPort = auditLogPort;
         this.clockPort = clockPort;
     }
@@ -60,14 +64,14 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
         Instant now = clockPort.now();
         Optional<CustomerContact> contactOpt = contactRepository.findByCustomerId(notification.getCustomerId());
 
-        if (contactOpt.isEmpty() || contactOpt.get().email() == null || contactOpt.get().email().isBlank()) {
-            log.warn("No email destination found for customer {}", notification.getCustomerId().value());
+        if (contactOpt.isEmpty()) {
+            log.warn("No contact profile found for customer {}", notification.getCustomerId().value());
             AuditRecord failedAudit = notification.markFailed(
                     FailureReason.INVALID_DESTINATION,
-                    Channel.EMAIL,
+                    Channel.SMS,
                     "system",
                     null,
-                    "No valid email address registered for customer",
+                    "No contact details registered for customer",
                     now
             );
             notificationRepository.save(notification);
@@ -75,46 +79,99 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
             return;
         }
 
-        String recipientEmail = contactOpt.get().email();
-        EmailSenderPort.EmailSendResult sendResult = emailSenderPort.sendEmail(recipientEmail, notification);
+        CustomerContact contact = contactOpt.get();
+        boolean hasPhone = contact.phone() != null && !contact.phone().isBlank();
+        boolean hasEmail = contact.email() != null && !contact.email().isBlank();
 
-        if (sendResult.success()) {
-            // Invariant 2: DELIVERED can only be reached from SENT
-            // Invariant 4: Every transition writes exactly one audit record
-            AuditRecord sentAudit = notification.markSent(
-                    Channel.EMAIL,
-                    sendResult.providerRef(),
-                    sendResult.latencyMs(),
-                    "system",
-                    null,
-                    now
-            );
-            auditLogPort.append(sentAudit);
-
-            // Policy ON_ACCEPT: mark DELIVERED right after SENT for simulated email
-            AuditRecord deliveredAudit = notification.markDelivered(
-                    Channel.EMAIL,
-                    "system",
-                    null,
-                    now
-            );
-            auditLogPort.append(deliveredAudit);
-
-            notificationRepository.save(notification);
-            log.info("Notification {} successfully sent and delivered to {}", notificationId, recipientEmail);
-        } else {
-            notification.recordFailedAttempt(Channel.EMAIL, sendResult.errorCode(), sendResult.latencyMs(), now);
+        if (!hasPhone && !hasEmail) {
+            log.warn("No valid destinations (phone or email) found for customer {}", notification.getCustomerId().value());
             AuditRecord failedAudit = notification.markFailed(
-                    FailureReason.PROVIDER_UNAVAILABLE,
-                    Channel.EMAIL,
+                    FailureReason.INVALID_DESTINATION,
+                    Channel.SMS,
                     "system",
                     null,
-                    "Email send failed: " + sendResult.errorCode(),
+                    "No valid phone or email registered for customer",
                     now
             );
             notificationRepository.save(notification);
             auditLogPort.append(failedAudit);
-            log.error("Notification {} failed delivery via EMAIL: {}", notificationId, sendResult.errorCode());
+            return;
         }
+
+        // 1. Primary Channel: Attempt SMS if phone destination is present
+        if (hasPhone) {
+            SmsSenderPort.SmsSendResult smsResult = smsSenderPort.sendSms(contact.phone(), notification);
+            if (smsResult.success()) {
+                AuditRecord sentAudit = notification.markSent(
+                        Channel.SMS,
+                        smsResult.providerRef(),
+                        smsResult.latencyMs(),
+                        "system",
+                        null,
+                        now
+                );
+                auditLogPort.append(sentAudit);
+
+                AuditRecord deliveredAudit = notification.markDelivered(
+                        Channel.SMS,
+                        "system",
+                        null,
+                        now
+                );
+                auditLogPort.append(deliveredAudit);
+
+                notificationRepository.save(notification);
+                log.info("Notification {} successfully delivered via SMS to {}", notificationId, contact.phone());
+                return;
+            } else {
+                notification.recordFailedAttempt(Channel.SMS, smsResult.errorCode(), smsResult.latencyMs(), now);
+                log.warn("SMS delivery failed for notification {} with {}. Triggering fallback to EMAIL.",
+                        notificationId, smsResult.errorCode());
+            }
+        }
+
+        // 2. Fallback Channel: Attempt EMAIL if email destination is present
+        if (hasEmail) {
+            EmailSenderPort.EmailSendResult emailResult = emailSenderPort.sendEmail(contact.email(), notification);
+            if (emailResult.success()) {
+                AuditRecord sentAudit = notification.markSent(
+                        Channel.EMAIL,
+                        emailResult.providerRef(),
+                        emailResult.latencyMs(),
+                        "system",
+                        null,
+                        now
+                );
+                auditLogPort.append(sentAudit);
+
+                AuditRecord deliveredAudit = notification.markDelivered(
+                        Channel.EMAIL,
+                        "system",
+                        null,
+                        now
+                );
+                auditLogPort.append(deliveredAudit);
+
+                notificationRepository.save(notification);
+                log.info("Notification {} successfully delivered via EMAIL fallback to {}", notificationId, contact.email());
+                return;
+            } else {
+                notification.recordFailedAttempt(Channel.EMAIL, emailResult.errorCode(), emailResult.latencyMs(), now);
+                log.error("Email fallback failed for notification {} with {}.", notificationId, emailResult.errorCode());
+            }
+        }
+
+        // 3. Terminal Failure: All candidate channels exhausted
+        AuditRecord failedAudit = notification.markFailed(
+                FailureReason.ALL_CHANNELS_EXHAUSTED,
+                hasEmail ? Channel.EMAIL : Channel.SMS,
+                "system",
+                null,
+                "All attempted channels failed delivery",
+                now
+        );
+        notificationRepository.save(notification);
+        auditLogPort.append(failedAudit);
+        log.error("Notification {} permanently failed: all channels exhausted", notificationId);
     }
 }

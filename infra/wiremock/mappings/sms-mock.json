@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/api/v1/sms"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "providerRef": "wm_sms_dev_default",
+      "status": "ACCEPTED"
+    }
+  }
+}

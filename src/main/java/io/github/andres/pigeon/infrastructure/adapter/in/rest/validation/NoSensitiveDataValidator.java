@@ -55,18 +55,22 @@ public class NoSensitiveDataValidator implements ConstraintValidator<NoSensitive
 
         // Check if string contains any 13-19 digit sequence passing Luhn
         if (containsLuhnCardNumber(digitsOnly)) {
-            context.disableDefaultConstraintViolation();
-            context.buildConstraintViolationWithTemplate("Sensitive data detected: full credit/debit card numbers are strictly forbidden")
-                    .addConstraintViolation();
+            if (context != null) {
+                context.disableDefaultConstraintViolation();
+                context.buildConstraintViolationWithTemplate("Sensitive data detected: full credit/debit card numbers are strictly forbidden")
+                        .addConstraintViolation();
+            }
             return false;
         }
 
         // Check for continuous digit runs of 10 or more digits
         Matcher matcher = LONG_DIGIT_RUN.matcher(s);
         if (matcher.find()) {
-            context.disableDefaultConstraintViolation();
-            context.buildConstraintViolationWithTemplate("Sensitive data detected: long account numbers (>9 digits) are strictly forbidden")
-                    .addConstraintViolation();
+            if (context != null) {
+                context.disableDefaultConstraintViolation();
+                context.buildConstraintViolationWithTemplate("Sensitive data detected: long account numbers (>9 digits) are strictly forbidden")
+                        .addConstraintViolation();
+            }
             return false;
         }
 

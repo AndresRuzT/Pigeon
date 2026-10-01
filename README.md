@@ -818,16 +818,16 @@ Work is done **one phase at a time**. A phase is complete only when every item i
 - [x] Outbox publisher relay ensuring transactional message publishing (eliminating dual-write risk)
 - [x] Status transitions `PENDING → SENT → DELIVERED / FAILED` with domain invariants
 - [x] Unit tests (domain, use cases), ArchUnit tests, integration tests with Testcontainers, CI running
-- [x] Docs: updated README, ADRs (0001 through 0008)
+- [x] Docs: updated README, ADRs (0001 through 0009)
 
 ### Phase 2: idempotency, retries, DLQ, second channel
 
-- [ ] Redis idempotency with database constraint and payload hash
-- [ ] Resilience4j retry, circuit breaker, bulkhead, timeouts
-- [ ] Retry ladder and DLQ; poison-message handling
-- [ ] `SmsChannelSender` against WireMock; fallback SMS to email
-- [ ] Inbound queue consumer as second ingestion path
-- [ ] Concurrency and fault-injection tests
+- [x] Redis idempotency with database constraint and payload hash
+- [x] Resilience4j retry, circuit breaker, bulkhead, timeouts
+- [x] Retry ladder and DLQ; poison-message handling
+- [x] `SmsChannelSender` against WireMock; fallback SMS to email
+- [x] Inbound queue consumer as second ingestion path
+- [x] Concurrency and fault-injection tests
 
 ### Phase 3: templates, preferences, priorities
 
