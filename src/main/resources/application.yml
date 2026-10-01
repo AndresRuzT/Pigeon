@@ -73,6 +73,11 @@ pigeon:
     high-priority-ttl-ms: ${PIGEON_HIGH_PRIORITY_TTL_MS:60000}
   outbox:
     poll-interval-ms: 500
+  providers:
+    sms:
+      base-url: ${PIGEON_SMS_BASE_URL:http://localhost:8089}
+    push:
+      base-url: ${PIGEON_PUSH_BASE_URL:http://localhost:8089}
 
 resilience4j:
   circuitbreaker:

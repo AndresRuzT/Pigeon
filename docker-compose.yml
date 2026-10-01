@@ -20,8 +20,8 @@ services:
       - PIGEON_REDIS_PORT=6379
       - PIGEON_SMTP_HOST=mailhog
       - PIGEON_SMTP_PORT=1025
-      - PIGEON_SMS_BASE_URL=http://wiremock:8080/sms
-      - PIGEON_PUSH_BASE_URL=http://wiremock:8080/push
+      - PIGEON_SMS_BASE_URL=http://wiremock:8080
+      - PIGEON_PUSH_BASE_URL=http://wiremock:8080
       - PIGEON_JWT_PUBLIC_KEY=classpath:certs/app.pub
     depends_on:
       postgres:
