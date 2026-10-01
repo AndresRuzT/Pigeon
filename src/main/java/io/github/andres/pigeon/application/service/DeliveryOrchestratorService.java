@@ -174,7 +174,7 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
                         );
                         notification.setTemplateDetails("sms_" + notification.getEventType().name().toLowerCase(), rendered.templateVersion());
 
-                        SmsSenderPort.SmsSendResult smsResult = smsSenderPort.sendSms(contact.phone(), notification);
+                        SmsSenderPort.SmsSendResult smsResult = smsSenderPort.sendSms(contact.phone(), notification, rendered.body());
                         if (smsResult.success()) {
                             AuditRecord sentAudit = notification.markSent(
                                     Channel.SMS, smsResult.providerRef(), smsResult.latencyMs(), "system", null, now

@@ -15,4 +15,8 @@ public interface SmsSenderPort {
     }
 
     SmsSendResult sendSms(String phoneNumber, Notification notification);
+
+    default SmsSendResult sendSms(String phoneNumber, Notification notification, String renderedMessage) {
+        return sendSms(phoneNumber, notification);
+    }
 }

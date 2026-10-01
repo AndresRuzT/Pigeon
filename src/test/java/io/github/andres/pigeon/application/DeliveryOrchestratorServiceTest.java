@@ -139,7 +139,7 @@ class DeliveryOrchestratorServiceTest {
 
         when(pushSenderPort.sendPush(eq("push_tok_123"), eq(notification), any(), any()))
                 .thenReturn(PushSenderPort.PushSendResult.failure("CIRCUIT_OPEN", 10L));
-        when(smsSenderPort.sendSms(eq("+15550198234"), eq(notification)))
+        when(smsSenderPort.sendSms(eq("+15550198234"), eq(notification), any()))
                 .thenReturn(SmsSenderPort.SmsSendResult.failure("PROVIDER_UNAVAILABLE", 200L));
         when(emailSenderPort.sendEmail(eq("maria@example.com"), eq(notification)))
                 .thenReturn(EmailSenderPort.EmailSendResult.ok("mailhog-123", 80L));
@@ -169,7 +169,7 @@ class DeliveryOrchestratorServiceTest {
 
         when(pushSenderPort.sendPush(any(), any(), any(), any()))
                 .thenReturn(PushSenderPort.PushSendResult.failure("CIRCUIT_OPEN", 10L));
-        when(smsSenderPort.sendSms(any(), any()))
+        when(smsSenderPort.sendSms(any(), any(), any()))
                 .thenReturn(SmsSenderPort.SmsSendResult.failure("PROVIDER_UNAVAILABLE", 500L));
         when(emailSenderPort.sendEmail(any(), any()))
                 .thenReturn(EmailSenderPort.EmailSendResult.error("SMTP_TIMEOUT", 2000L));
@@ -240,13 +240,13 @@ class DeliveryOrchestratorServiceTest {
                 .thenReturn(Optional.of(CustomerContact.of("cus_8F2A91", null, "+15550198234", null)));
         when(preferenceRepository.findByCustomerId(otpNotification.getCustomerId()))
                 .thenReturn(Optional.of(restrictivePref));
-        when(smsSenderPort.sendSms(eq("+15550198234"), eq(otpNotification)))
+        when(smsSenderPort.sendSms(eq("+15550198234"), eq(otpNotification), any()))
                 .thenReturn(SmsSenderPort.SmsSendResult.success("wm_sms_otp", 20L));
 
         orchestrator.process(otpNotification.getId());
 
         assertThat(otpNotification.getStatus()).isEqualTo(NotificationStatus.DELIVERED);
-        verify(smsSenderPort).sendSms(any(), any());
+        verify(smsSenderPort).sendSms(any(), any(), any());
     }
 
     @Test

@@ -62,8 +62,15 @@ public class SmsChannelSender implements SmsSenderPort {
 
     @Override
     public SmsSendResult sendSms(String phoneNumber, Notification notification) {
+        return sendSms(phoneNumber, notification, buildSmsContent(notification));
+    }
+
+    @Override
+    public SmsSendResult sendSms(String phoneNumber, Notification notification, String renderedMessage) {
         long startTime = System.currentTimeMillis();
-        String messageText = buildSmsContent(notification);
+        String messageText = (renderedMessage != null && !renderedMessage.isBlank())
+                ? renderedMessage
+                : buildSmsContent(notification);
 
         Supplier<SmsResponse> sendSupplier = () -> restClient.post()
                 .uri("/api/v1/sms")
