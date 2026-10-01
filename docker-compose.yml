@@ -1,0 +1,123 @@
+services:
+  pigeon:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pigeon-app
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+      - "${MANAGEMENT_SERVER_PORT:-8081}:8081"
+    environment:
+      - SPRING_PROFILES_ACTIVE=local
+      - PIGEON_DB_URL=jdbc:postgresql://postgres:5432/pigeon
+      - PIGEON_DB_USER=${PIGEON_DB_USER:-pigeon_app}
+      - PIGEON_DB_PASSWORD=${PIGEON_DB_PASSWORD:-pigeon_dev_password}
+      - PIGEON_RABBIT_HOST=rabbitmq
+      - PIGEON_RABBIT_PORT=5672
+      - PIGEON_RABBIT_USER=${PIGEON_RABBIT_USER:-guest}
+      - PIGEON_RABBIT_PASSWORD=${PIGEON_RABBIT_PASSWORD:-guest}
+      - PIGEON_REDIS_HOST=redis
+      - PIGEON_REDIS_PORT=6379
+      - PIGEON_SMTP_HOST=mailhog
+      - PIGEON_SMTP_PORT=1025
+      - PIGEON_SMS_BASE_URL=http://wiremock:8080/sms
+      - PIGEON_PUSH_BASE_URL=http://wiremock:8080/push
+      - PIGEON_JWT_PUBLIC_KEY=classpath:certs/app.pub
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health | grep UP || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: pigeon-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: pigeon
+      POSTGRES_USER: ${PIGEON_DB_USER:-pigeon_app}
+      POSTGRES_PASSWORD: ${PIGEON_DB_PASSWORD:-pigeon_dev_password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PIGEON_DB_USER:-pigeon_app} -d pigeon"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: pigeon-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${PIGEON_RABBIT_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${PIGEON_RABBIT_PASSWORD:-guest}
+    volumes:
+      - rabbitdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: pigeon-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: pigeon-mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  wiremock:
+    image: wiremock/wiremock:3.9.1
+    container_name: pigeon-wiremock
+    ports:
+      - "8089:8080"
+    volumes:
+      - ./infra/wiremock:/home/wiremock:ro
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: pigeon-prometheus
+    profiles: ["observability"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: pigeon-grafana
+    profiles: ["observability"]
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+
+volumes:
+  pgdata:
+  rabbitdata:

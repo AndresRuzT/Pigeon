@@ -1,0 +1,13 @@
+package io.github.andres.pigeon.domain.enums;
+
+public enum FailureReason {
+    PROVIDER_UNAVAILABLE,
+    PROVIDER_REJECTED,
+    ALL_CHANNELS_EXHAUSTED,
+    EXPIRED,
+    INVALID_DESTINATION,
+    SUPPRESSED_OPT_OUT,
+    SUPPRESSED_NO_ALLOWED_CHANNEL,
+    TEMPLATE_NOT_FOUND,
+    POISON_MESSAGE
+}
