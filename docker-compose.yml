@@ -113,7 +113,9 @@ services:
   prometheus:
     image: prom/prometheus:v2.54.1
     container_name: pigeon-prometheus
-    profiles: ["observability"]
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "9090:9090"
     volumes:
@@ -122,7 +124,7 @@ services:
   grafana:
     image: grafana/grafana:11.2.0
     container_name: pigeon-grafana
-    profiles: ["observability"]
+    restart: unless-stopped
     ports:
       - "3000:3000"
     volumes:
