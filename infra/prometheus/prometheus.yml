@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: "pigeon"
+    metrics_path: "/actuator/prometheus"
+    static_configs:
+      - targets: ["pigeon:8081", "pigeon-app:8081", "host.docker.internal:8081"]

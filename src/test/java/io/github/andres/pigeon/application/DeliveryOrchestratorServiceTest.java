@@ -70,6 +70,12 @@ class DeliveryOrchestratorServiceTest {
     @Mock
     private ClockPort clockPort;
 
+    @Mock
+    private io.github.andres.pigeon.application.port.out.MetricsPort metricsPort;
+
+    @Mock
+    private io.github.andres.pigeon.application.port.out.DeliveryPolicyPort deliveryPolicyPort;
+
     private DeliveryOrchestratorService orchestrator;
     private Instant now;
     private Notification notification;
@@ -80,6 +86,8 @@ class DeliveryOrchestratorServiceTest {
         org.mockito.Mockito.lenient().when(clockPort.now()).thenReturn(now);
         org.mockito.Mockito.lenient().when(templateEnginePort.render(any(), any(), any(), any()))
                 .thenReturn(new TemplateEnginePort.RenderedMessage("Subject", "Body content", "v1.0.0"));
+        org.mockito.Mockito.lenient().when(deliveryPolicyPort.getConfirmationPolicy(any()))
+                .thenReturn(io.github.andres.pigeon.domain.enums.DeliveryConfirmationPolicy.ON_ACCEPT);
 
         orchestrator = new DeliveryOrchestratorService(
                 notificationRepository,
@@ -90,7 +98,9 @@ class DeliveryOrchestratorServiceTest {
                 emailSenderPort,
                 templateEnginePort,
                 auditLogPort,
-                clockPort
+                clockPort,
+                metricsPort,
+                deliveryPolicyPort
         );
 
         notification = Notification.createPending(
@@ -285,5 +295,24 @@ class DeliveryOrchestratorServiceTest {
         verify(pushSenderPort, never()).sendPush(any(), any(), any(), any());
         verify(smsSenderPort, never()).sendSms(any(), any());
         verify(emailSenderPort, never()).sendEmail(any(), any());
+    }
+
+    @Test
+    @DisplayName("Should stay in SENT status when channel confirmation policy is ON_RECEIPT")
+    void shouldKeepStatusSentWhenPolicyIsOnReceipt() {
+        when(deliveryPolicyPort.getConfirmationPolicy(Channel.PUSH))
+                .thenReturn(io.github.andres.pigeon.domain.enums.DeliveryConfirmationPolicy.ON_RECEIPT);
+        when(notificationRepository.findById(notification.getId())).thenReturn(Optional.of(notification));
+        when(contactRepository.findByCustomerId(notification.getCustomerId()))
+                .thenReturn(Optional.of(CustomerContact.of("cus_8F2A91", null, null, "push_tok_123")));
+        when(pushSenderPort.sendPush(eq("push_tok_123"), eq(notification), any(), any()))
+                .thenReturn(PushSenderPort.PushSendResult.success("wm_push_ref_receipt", 15L));
+
+        orchestrator.process(notification.getId());
+
+        assertThat(notification.getStatus()).isEqualTo(NotificationStatus.SENT);
+        verify(pushSenderPort).sendPush(any(), any(), any(), any());
+        verify(auditLogPort).append(any());
+        verify(metricsPort).recordDeliveryAttempt(Channel.PUSH, "SUCCESS");
     }
 }

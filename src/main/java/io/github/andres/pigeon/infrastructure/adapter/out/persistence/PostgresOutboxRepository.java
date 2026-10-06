@@ -56,4 +56,14 @@ public class PostgresOutboxRepository implements OutboxRepository {
             repository.save(entity);
         });
     }
+
+    @Override
+    public int purgePublishedOlderThan(Instant threshold) {
+        return repository.purgePublishedOlderThan(threshold);
+    }
+
+    @Override
+    public long countUnpublished() {
+        return repository.countUnpublished();
+    }
 }

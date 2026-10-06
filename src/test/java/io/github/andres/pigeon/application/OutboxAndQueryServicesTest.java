@@ -130,4 +130,18 @@ class OutboxAndQueryServicesTest {
         verify(notificationRepository).findById(id);
         verify(auditLogPort).findByNotificationId(id);
     }
+
+    @Test
+    @DisplayName("OutboxRelayService should purge published messages older than 7 days")
+    void shouldPurgePublishedOutboxMessages() {
+        Instant now = Instant.parse("2026-10-05T12:00:00Z");
+        when(clockPort.now()).thenReturn(now);
+        when(outboxRepository.purgePublishedOlderThan(any())).thenReturn(5);
+
+        OutboxRelayService relayService = new OutboxRelayService(outboxRepository, messagePublisher, clockPort);
+        int purged = relayService.purgePublishedMessages();
+
+        assertThat(purged).isEqualTo(5);
+        verify(outboxRepository).purgePublishedOlderThan(now.minus(java.time.Duration.ofDays(7)));
+    }
 }

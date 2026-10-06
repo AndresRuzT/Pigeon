@@ -65,6 +65,9 @@ class IngestEventServiceTest {
     @Mock
     private CustomerPreferenceRepository customerPreferenceRepository;
 
+    @Mock
+    private io.github.andres.pigeon.application.port.out.MetricsPort metricsPort;
+
     private IngestEventService service;
     private Instant now;
 
@@ -86,7 +89,8 @@ class IngestEventServiceTest {
                 clockPort,
                 idempotencyStore,
                 rateLimiterPort,
-                customerPreferenceRepository
+                customerPreferenceRepository,
+                metricsPort
         );
     }
 

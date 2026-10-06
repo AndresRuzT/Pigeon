@@ -54,6 +54,9 @@ class RabbitMessagingListenersTest {
     @Mock
     private io.github.andres.pigeon.application.port.out.ClockPort clockPort;
 
+    @Mock
+    private io.github.andres.pigeon.application.port.out.MetricsPort metricsPort;
+
     private ObjectMapper objectMapper;
     private RabbitNotificationListener notificationListener;
     private RabbitInboundEventListener inboundEventListener;
@@ -67,7 +70,7 @@ class RabbitMessagingListenersTest {
         notificationListener = new RabbitNotificationListener(processNotificationUseCase, rabbitTemplate, objectMapper);
         inboundEventListener = new RabbitInboundEventListener(ingestEventUseCase, rabbitTemplate, objectMapper);
         expiredListener = new io.github.andres.pigeon.infrastructure.adapter.in.messaging.RabbitExpiredListener(
-                notificationRepository, auditLogPort, clockPort, objectMapper
+                notificationRepository, auditLogPort, clockPort, objectMapper, metricsPort
         );
     }
 

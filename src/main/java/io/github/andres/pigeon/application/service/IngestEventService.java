@@ -39,6 +39,7 @@ public class IngestEventService implements IngestEventUseCase {
     private final IdempotencyStore idempotencyStore;
     private final RateLimiterPort rateLimiterPort;
     private final CustomerPreferenceRepository customerPreferenceRepository;
+    private final io.github.andres.pigeon.application.port.out.MetricsPort metricsPort;
 
     public IngestEventService(
             NotificationRepository notificationRepository,
@@ -47,7 +48,8 @@ public class IngestEventService implements IngestEventUseCase {
             ClockPort clockPort,
             IdempotencyStore idempotencyStore,
             RateLimiterPort rateLimiterPort,
-            CustomerPreferenceRepository customerPreferenceRepository
+            CustomerPreferenceRepository customerPreferenceRepository,
+            io.github.andres.pigeon.application.port.out.MetricsPort metricsPort
     ) {
         this.notificationRepository = notificationRepository;
         this.outboxRepository = outboxRepository;
@@ -56,6 +58,7 @@ public class IngestEventService implements IngestEventUseCase {
         this.idempotencyStore = idempotencyStore;
         this.rateLimiterPort = rateLimiterPort;
         this.customerPreferenceRepository = customerPreferenceRepository;
+        this.metricsPort = metricsPort;
     }
 
     @Override
@@ -77,6 +80,7 @@ public class IngestEventService implements IngestEventUseCase {
 
         // 2. Rate Limiting Check (runs only on non-replay requests)
         if (!rateLimiterPort.isAllowed(command.customerId(), command.eventType())) {
+            metricsPort.recordRateLimitRejected(command.eventType().name().contains("OTP") ? "otp" : "standard");
             idempotencyStore.evict(command.clientId(), key);
             throw new RateLimitExceededException("Rate limit exceeded for customer " + command.customerId(), 60L);
         }
@@ -92,6 +96,7 @@ public class IngestEventService implements IngestEventUseCase {
                 if (!existing.getPayloadHash().equals(command.payloadHash())) {
                     throw new DuplicateEventException(command.clientId(), command.idempotencyKey());
                 }
+                metricsPort.recordDuplicateNotification();
                 idempotencyStore.save(command.clientId(), key, existing.getPayloadHash(), existing.getId(), IDEMPOTENCY_TTL);
                 return new IngestEventCommand.IngestResult(
                         existing.getId(),
@@ -111,6 +116,7 @@ public class IngestEventService implements IngestEventUseCase {
             IdempotencyKey key,
             IdempotencyStore.StoredIdempotency stored
     ) {
+        metricsPort.recordDuplicateNotification();
         if (stored != null) {
             if (!stored.payloadHash().equals(command.payloadHash())) {
                 throw new DuplicateEventException(command.clientId(), command.idempotencyKey());
@@ -174,6 +180,7 @@ public class IngestEventService implements IngestEventUseCase {
             if (!notification.getPayloadHash().equals(command.payloadHash())) {
                 throw new DuplicateEventException(command.clientId(), command.idempotencyKey());
             }
+            metricsPort.recordDuplicateNotification();
             idempotencyStore.save(command.clientId(), key, notification.getPayloadHash(), notification.getId(), IDEMPOTENCY_TTL);
             return new IngestEventCommand.IngestResult(
                     notification.getId(),
@@ -219,6 +226,7 @@ public class IngestEventService implements IngestEventUseCase {
                         now
                 );
                 auditLogPort.append(audit);
+                metricsPort.recordNotificationFinal(NotificationStatus.FAILED, FailureReason.SUPPRESSED_OPT_OUT.name());
                 idempotencyStore.save(command.clientId(), key, saved.getPayloadHash(), saved.getId(), IDEMPOTENCY_TTL);
                 return new IngestEventCommand.IngestResult(saved.getId(), "FAILED", saved.getPriority(), false);
             }
@@ -252,6 +260,7 @@ public class IngestEventService implements IngestEventUseCase {
                         now
                 );
                 auditLogPort.append(audit);
+                metricsPort.recordNotificationAccepted(saved.getEventType(), saved.getPriority());
                 idempotencyStore.save(command.clientId(), key, saved.getPayloadHash(), saved.getId(), IDEMPOTENCY_TTL);
                 return new IngestEventCommand.IngestResult(saved.getId(), "DEFERRED", saved.getPriority(), false);
             }
@@ -284,6 +293,7 @@ public class IngestEventService implements IngestEventUseCase {
                 now
         );
         auditLogPort.append(initialAudit);
+        metricsPort.recordNotificationAccepted(saved.getEventType(), saved.getPriority());
 
         String routingKey = saved.getPriority().name().toLowerCase();
         String envelopePayload = """

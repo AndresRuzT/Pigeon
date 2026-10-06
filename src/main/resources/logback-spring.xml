@@ -3,7 +3,7 @@
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
             <layout class="io.github.andres.pigeon.infrastructure.config.MaskingPatternLayout">
-                <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+                <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [svc=%X{service:-pigeon},cid=%X{correlationId:--},nid=%X{notificationId:--}] %logger{36} - %msg%n</pattern>
             </layout>
         </encoder>
     </appender>

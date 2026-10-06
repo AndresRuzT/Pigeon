@@ -50,4 +50,15 @@ public class OutboxRelayService {
             }
         }
     }
+
+    @Scheduled(fixedDelayString = "${pigeon.outbox.purge-interval-ms:86400000}")
+    @Transactional
+    public int purgePublishedMessages() {
+        java.time.Instant threshold = clockPort.now().minus(java.time.Duration.ofDays(7));
+        int purged = outboxRepository.purgePublishedOlderThan(threshold);
+        if (purged > 0) {
+            log.info("Purged {} published outbox events older than {}", purged, threshold);
+        }
+        return purged;
+    }
 }

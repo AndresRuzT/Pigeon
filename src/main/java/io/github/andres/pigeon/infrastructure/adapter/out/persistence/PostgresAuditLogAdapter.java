@@ -23,8 +23,46 @@ public class PostgresAuditLogAdapter implements AuditLogPort {
 
     @Override
     public void append(AuditRecord record) {
-        AuditLogJpaEntity entity = mapper.toJpaEntity(record);
+        String prevHash = record.prevHash();
+        if (prevHash == null) {
+            String priorHash = repository.findTopByNotificationIdOrderByOccurredAtDesc(record.notificationId())
+                    .map(AuditLogJpaEntity::getPrevHash)
+                    .orElse("0000000000000000000000000000000000000000000000000000000000000000");
+            prevHash = computeSha256(priorHash, record);
+        }
+
+        AuditRecord chainedRecord = new AuditRecord(
+                record.id(),
+                record.occurredAt(),
+                record.notificationId(),
+                record.customerId(),
+                record.actor(),
+                record.action(),
+                record.fromStatus(),
+                record.toStatus(),
+                record.channel(),
+                record.templateVersion(),
+                record.reason(),
+                record.correlationId(),
+                prevHash
+        );
+
+        AuditLogJpaEntity entity = mapper.toJpaEntity(chainedRecord);
         repository.save(entity);
+    }
+
+    private String computeSha256(String priorHash, AuditRecord record) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            String data = priorHash + "|" + record.id() + "|" + record.occurredAt() + "|"
+                    + record.actor() + "|" + record.action() + "|" + record.toStatus() + "|"
+                    + (record.channel() != null ? record.channel().name() : "") + "|"
+                    + (record.reason() != null ? record.reason() : "");
+            byte[] hash = digest.digest(data.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(hash);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 algorithm not available", e);
+        }
     }
 
     @Override

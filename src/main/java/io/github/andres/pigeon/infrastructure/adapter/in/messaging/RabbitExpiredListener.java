@@ -34,17 +34,20 @@ public class RabbitExpiredListener {
     private final AuditLogPort auditLogPort;
     private final ClockPort clockPort;
     private final ObjectMapper objectMapper;
+    private final io.github.andres.pigeon.application.port.out.MetricsPort metricsPort;
 
     public RabbitExpiredListener(
             NotificationRepository notificationRepository,
             AuditLogPort auditLogPort,
             ClockPort clockPort,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            io.github.andres.pigeon.application.port.out.MetricsPort metricsPort
     ) {
         this.notificationRepository = notificationRepository;
         this.auditLogPort = auditLogPort;
         this.clockPort = clockPort;
         this.objectMapper = objectMapper;
+        this.metricsPort = metricsPort;
     }
 
     @RabbitListener(queues = RabbitConfig.QUEUE_EXPIRED)
@@ -77,6 +80,7 @@ public class RabbitExpiredListener {
                     );
                     notificationRepository.save(notification);
                     auditLogPort.append(expiredAudit);
+                    metricsPort.recordNotificationFinal(io.github.andres.pigeon.domain.enums.NotificationStatus.FAILED, FailureReason.EXPIRED.name());
                     log.warn("Marked notification {} as FAILED (EXPIRED) due to high-priority TTL expiration.", notificationId);
                 }
             }

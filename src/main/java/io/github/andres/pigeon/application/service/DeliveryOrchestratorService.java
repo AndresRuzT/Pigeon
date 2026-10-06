@@ -5,12 +5,15 @@ import io.github.andres.pigeon.application.port.out.AuditLogPort;
 import io.github.andres.pigeon.application.port.out.ClockPort;
 import io.github.andres.pigeon.application.port.out.ContactRepository;
 import io.github.andres.pigeon.application.port.out.CustomerPreferenceRepository;
+import io.github.andres.pigeon.application.port.out.DeliveryPolicyPort;
 import io.github.andres.pigeon.application.port.out.EmailSenderPort;
+import io.github.andres.pigeon.application.port.out.MetricsPort;
 import io.github.andres.pigeon.application.port.out.NotificationRepository;
 import io.github.andres.pigeon.application.port.out.PushSenderPort;
 import io.github.andres.pigeon.application.port.out.SmsSenderPort;
 import io.github.andres.pigeon.application.port.out.TemplateEnginePort;
 import io.github.andres.pigeon.domain.enums.Channel;
+import io.github.andres.pigeon.domain.enums.DeliveryConfirmationPolicy;
 import io.github.andres.pigeon.domain.enums.FailureReason;
 import io.github.andres.pigeon.domain.enums.NotificationStatus;
 import io.github.andres.pigeon.domain.exception.NotificationNotFoundException;
@@ -24,6 +27,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -43,6 +47,8 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
     private final TemplateEnginePort templateEnginePort;
     private final AuditLogPort auditLogPort;
     private final ClockPort clockPort;
+    private final MetricsPort metricsPort;
+    private final DeliveryPolicyPort deliveryPolicyPort;
 
     public DeliveryOrchestratorService(
             NotificationRepository notificationRepository,
@@ -53,7 +59,9 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
             EmailSenderPort emailSenderPort,
             TemplateEnginePort templateEnginePort,
             AuditLogPort auditLogPort,
-            ClockPort clockPort
+            ClockPort clockPort,
+            MetricsPort metricsPort,
+            DeliveryPolicyPort deliveryPolicyPort
     ) {
         this.notificationRepository = notificationRepository;
         this.contactRepository = contactRepository;
@@ -64,6 +72,8 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
         this.templateEnginePort = templateEnginePort;
         this.auditLogPort = auditLogPort;
         this.clockPort = clockPort;
+        this.metricsPort = metricsPort;
+        this.deliveryPolicyPort = deliveryPolicyPort;
     }
 
     @Override
@@ -97,6 +107,7 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
             );
             notificationRepository.save(notification);
             auditLogPort.append(failedAudit);
+            metricsPort.recordNotificationFinal(NotificationStatus.FAILED, FailureReason.INVALID_DESTINATION.name());
             return;
         }
 
@@ -125,6 +136,7 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
             );
             notificationRepository.save(notification);
             auditLogPort.append(failedAudit);
+            metricsPort.recordNotificationFinal(NotificationStatus.FAILED, FailureReason.SUPPRESSED_NO_ALLOWED_CHANNEL.name());
             return;
         }
 
@@ -132,6 +144,10 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
         Channel lastAttemptedChannel = null;
 
         for (Channel channel : candidateChannels) {
+            if (lastAttemptedChannel != null && lastAttemptedChannel != channel) {
+                metricsPort.recordFallbackTriggered(lastAttemptedChannel, channel);
+            }
+
             switch (channel) {
                 case PUSH -> {
                     if (contact.pushToken() != null && !contact.pushToken().isBlank()) {
@@ -146,22 +162,27 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
                                 contact.pushToken(), notification, rendered.subjectOrTitle(), rendered.body()
                         );
 
+                        metricsPort.recordDeliveryAttempt(Channel.PUSH, pushResult != null && pushResult.success() ? "SUCCESS" : "FAILED");
                         if (pushResult != null && pushResult.success()) {
                             AuditRecord sentAudit = notification.markSent(
                                     Channel.PUSH, pushResult.providerRef(), pushResult.latencyMs(), "system", null, now
                             );
                             auditLogPort.append(sentAudit);
+                            metricsPort.recordDeliveryLatency(Channel.PUSH, notification.getPriority(), Duration.ofMillis(pushResult.latencyMs()));
 
-                            AuditRecord deliveredAudit = notification.markDelivered(Channel.PUSH, "system", null, now);
-                            auditLogPort.append(deliveredAudit);
+                            if (deliveryPolicyPort.getConfirmationPolicy(Channel.PUSH) == DeliveryConfirmationPolicy.ON_ACCEPT) {
+                                AuditRecord deliveredAudit = notification.markDelivered(Channel.PUSH, "system", null, now);
+                                auditLogPort.append(deliveredAudit);
+                                metricsPort.recordNotificationFinal(NotificationStatus.DELIVERED, null);
+                            }
 
                             notificationRepository.save(notification);
-                            log.info("Notification {} successfully delivered via PUSH to customer {}", notificationId, notification.getCustomerId().value());
+                            log.info("Notification {} successfully dispatched via PUSH to customer {}", notificationId, notification.getCustomerId().value());
                             return;
                         } else {
-                            notification.recordFailedAttempt(Channel.PUSH, pushResult.errorCode(), pushResult.latencyMs(), now);
-                            log.warn("PUSH delivery failed for notification {} with {}. Continuing fallback chain.",
-                                    notificationId, pushResult.errorCode());
+                            notification.recordFailedAttempt(Channel.PUSH, pushResult != null ? pushResult.errorCode() : "UNKNOWN",
+                                    pushResult != null ? pushResult.latencyMs() : 0, now);
+                            log.warn("PUSH delivery failed for notification {}. Continuing fallback chain.", notificationId);
                         }
                     }
                 }
@@ -175,22 +196,26 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
                         notification.setTemplateDetails("sms_" + notification.getEventType().name().toLowerCase(), rendered.templateVersion());
 
                         SmsSenderPort.SmsSendResult smsResult = smsSenderPort.sendSms(contact.phone(), notification, rendered.body());
+                        metricsPort.recordDeliveryAttempt(Channel.SMS, smsResult.success() ? "SUCCESS" : "FAILED");
                         if (smsResult.success()) {
                             AuditRecord sentAudit = notification.markSent(
                                     Channel.SMS, smsResult.providerRef(), smsResult.latencyMs(), "system", null, now
                             );
                             auditLogPort.append(sentAudit);
+                            metricsPort.recordDeliveryLatency(Channel.SMS, notification.getPriority(), Duration.ofMillis(smsResult.latencyMs()));
 
-                            AuditRecord deliveredAudit = notification.markDelivered(Channel.SMS, "system", null, now);
-                            auditLogPort.append(deliveredAudit);
+                            if (deliveryPolicyPort.getConfirmationPolicy(Channel.SMS) == DeliveryConfirmationPolicy.ON_ACCEPT) {
+                                AuditRecord deliveredAudit = notification.markDelivered(Channel.SMS, "system", null, now);
+                                auditLogPort.append(deliveredAudit);
+                                metricsPort.recordNotificationFinal(NotificationStatus.DELIVERED, null);
+                            }
 
                             notificationRepository.save(notification);
-                            log.info("Notification {} successfully delivered via SMS to {}", notificationId, contact.phone());
+                            log.info("Notification {} successfully dispatched via SMS to {}", notificationId, contact.phone());
                             return;
                         } else {
                             notification.recordFailedAttempt(Channel.SMS, smsResult.errorCode(), smsResult.latencyMs(), now);
-                            log.warn("SMS delivery failed for notification {} with {}. Continuing fallback chain.",
-                                    notificationId, smsResult.errorCode());
+                            log.warn("SMS delivery failed for notification {}. Continuing fallback chain.", notificationId);
                         }
                     }
                 }
@@ -204,21 +229,26 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
                         notification.setTemplateDetails("email_" + notification.getEventType().name().toLowerCase(), rendered.templateVersion());
 
                         EmailSenderPort.EmailSendResult emailResult = emailSenderPort.sendEmail(contact.email(), notification);
+                        metricsPort.recordDeliveryAttempt(Channel.EMAIL, emailResult.success() ? "SUCCESS" : "FAILED");
                         if (emailResult.success()) {
                             AuditRecord sentAudit = notification.markSent(
                                     Channel.EMAIL, emailResult.providerRef(), emailResult.latencyMs(), "system", null, now
                             );
                             auditLogPort.append(sentAudit);
+                            metricsPort.recordDeliveryLatency(Channel.EMAIL, notification.getPriority(), Duration.ofMillis(emailResult.latencyMs()));
 
-                            AuditRecord deliveredAudit = notification.markDelivered(Channel.EMAIL, "system", null, now);
-                            auditLogPort.append(deliveredAudit);
+                            if (deliveryPolicyPort.getConfirmationPolicy(Channel.EMAIL) == DeliveryConfirmationPolicy.ON_ACCEPT) {
+                                AuditRecord deliveredAudit = notification.markDelivered(Channel.EMAIL, "system", null, now);
+                                auditLogPort.append(deliveredAudit);
+                                metricsPort.recordNotificationFinal(NotificationStatus.DELIVERED, null);
+                            }
 
                             notificationRepository.save(notification);
-                            log.info("Notification {} successfully delivered via EMAIL fallback to {}", notificationId, contact.email());
+                            log.info("Notification {} successfully dispatched via EMAIL fallback to {}", notificationId, contact.email());
                             return;
                         } else {
                             notification.recordFailedAttempt(Channel.EMAIL, emailResult.errorCode(), emailResult.latencyMs(), now);
-                            log.error("Email fallback failed for notification {} with {}.", notificationId, emailResult.errorCode());
+                            log.error("Email fallback failed for notification {}.", notificationId);
                         }
                     }
                 }
@@ -237,6 +267,7 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
             );
             notificationRepository.save(notification);
             auditLogPort.append(failedAudit);
+            metricsPort.recordNotificationFinal(NotificationStatus.FAILED, FailureReason.INVALID_DESTINATION.name());
             return;
         }
 
@@ -251,6 +282,7 @@ public class DeliveryOrchestratorService implements ProcessNotificationUseCase {
         );
         notificationRepository.save(notification);
         auditLogPort.append(failedAudit);
+        metricsPort.recordNotificationFinal(NotificationStatus.FAILED, FailureReason.ALL_CHANNELS_EXHAUSTED.name());
         log.error("Notification {} permanently failed: all channels exhausted", notificationId);
     }
 }

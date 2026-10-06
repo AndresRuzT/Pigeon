@@ -73,6 +73,14 @@ pigeon:
     high-priority-ttl-ms: ${PIGEON_HIGH_PRIORITY_TTL_MS:60000}
   outbox:
     poll-interval-ms: 500
+    purge-interval-ms: 86400000
+  delivery:
+    confirmation-policy:
+      push: ${PIGEON_DELIVERY_CONFIRMATION_PUSH:ON_ACCEPT}
+      sms: ${PIGEON_DELIVERY_CONFIRMATION_SMS:ON_ACCEPT}
+      email: ${PIGEON_DELIVERY_CONFIRMATION_EMAIL:ON_ACCEPT}
+  webhooks:
+    secret: ${PIGEON_WEBHOOK_SECRET:pigeon_dev_webhook_secret_key_1234567890}
   providers:
     sms:
       base-url: ${PIGEON_SMS_BASE_URL:http://localhost:8089}

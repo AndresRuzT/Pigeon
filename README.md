@@ -79,9 +79,9 @@ Pigeon is a **backend-only** project. There is no custom frontend. Everything ca
 
 | Item | Value |
 |---|---|
-| Current phase | **Phase 3 complete** (Ready for Phase 4) |
+| Current phase | **Phase 4 complete** (Ready for Phase 5) |
 | Latest release | none |
-| Next milestone | Phase 4 definition of done (see [section 19](#19-development-phases-and-definition-of-done)) |
+| Next milestone | Phase 5 definition of done (see [section 19](#19-development-phases-and-definition-of-done)) |
 
 ### 2.2 Decisions taken
 
@@ -106,6 +106,9 @@ Pigeon is a **backend-only** project. There is no custom frontend. Everything ca
 | D-17 | Customer preferences and quiet hours policy | Confirmed | Non-business hours (before 08:00, at/after 18:00 Mon-Fri, all weekends) deferred to next business day 08:00; security events exempt (ADR-0011) |
 | D-18 | Push channel and full cascade fallback | Confirmed | `PUSH → SMS → EMAIL` fallback cascade with Resilience4j circuit breakers and retries (ADR-0012) |
 | D-19 | Sliding-window Redis rate limiting | Confirmed | Dual-bucket (OTP 5/10m, standard 10/1h) with fail-open semantics and replay bypass (ADR-0012) |
+| D-20 | Outbox publisher confirms and hash-chained audit | Confirmed | SKIP LOCKED polling, broker publisher confirms, 7-day retention purge, and cryptographic SHA-256 hash-chained audit trail with TRUNCATE prevention (ADR-0013) |
+| D-21 | Micrometer metrics and Grafana observability | Confirmed | Hexagonal MetricsPort, Prometheus actuator scrape, and provisioned Grafana dashboard covering acceptance, latency, circuit breakers, and queues (ADR-0013) |
+| D-22 | Delivery receipts via signed webhook | Confirmed | HMAC-SHA256 signature verification for asynchronous SMS/Push delivery status callbacks (ADR-0008, ADR-0013) |
 
 ### 2.3 Open decisions
 
@@ -846,10 +849,10 @@ Work is done **one phase at a time**. A phase is complete only when every item i
 
 ### Phase 4: outbox, audit, metrics, dashboard
 
-- [ ] Outbox table, relay with `SKIP LOCKED`, publisher confirms, crash-recovery test
-- [ ] Complete immutable audit (privileges and trigger)
-- [ ] Micrometer metrics and structured logs; Prometheus and Grafana provisioned dashboard
-- [ ] Delivery receipts via signed webhook
+- [x] Outbox table, relay with `SKIP LOCKED`, publisher confirms, crash-recovery test
+- [x] Complete immutable audit (privileges and trigger)
+- [x] Micrometer metrics and structured logs; Prometheus and Grafana provisioned dashboard
+- [x] Delivery receipts via signed webhook
 
 ### Phase 5: documentation and release
 
@@ -877,7 +880,7 @@ pigeon/
 │   ├── workflows/ci.yml
 │   └── dependabot.yml
 ├── docs/
-│   ├── adr/                  Architecture Decision Records (ADR-0001 through ADR-0012)
+│   ├── adr/                  Architecture Decision Records (ADR-0001 through ADR-0013)
 │   ├── api/openapi.yaml
 │   ├── assets/               Logos, screenshots, GIFs
 │   ├── data-model.md

@@ -10,4 +10,5 @@ import java.util.UUID;
 @Repository
 public interface SpringDataAuditLogRepository extends JpaRepository<AuditLogJpaEntity, UUID> {
     List<AuditLogJpaEntity> findByNotificationIdOrderByOccurredAtAsc(UUID notificationId);
+    java.util.Optional<AuditLogJpaEntity> findTopByNotificationIdOrderByOccurredAtDesc(UUID notificationId);
 }

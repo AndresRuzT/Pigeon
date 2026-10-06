@@ -36,6 +36,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/webhooks/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/events").hasAuthority("SCOPE_notifications:write")
                         .requestMatchers(HttpMethod.GET, "/api/v1/notifications/**").hasAuthority("SCOPE_notifications:read")
                         .anyRequest().authenticated()

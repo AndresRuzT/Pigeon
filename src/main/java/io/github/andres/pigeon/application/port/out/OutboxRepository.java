@@ -8,6 +8,8 @@ public interface OutboxRepository {
     void save(OutboxMessage message);
     List<OutboxMessage> lockNextBatch(int batchSize);
     void markPublished(UUID messageId, Instant publishedAt);
+    int purgePublishedOlderThan(Instant threshold);
+    long countUnpublished();
 
     record OutboxMessage(
             UUID id,
