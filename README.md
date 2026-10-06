@@ -189,8 +189,8 @@ For asynchronous channels (SMS, Push), external providers notify Pigeon of final
 Launch the entire infrastructure and Pigeon service with a single command:
 
 ```bash
-git clone https://github.com/andres/pigeon.git
-cd pigeon
+git clone https://github.com/AndresRuzT/Pigeon.git
+cd Pigeon
 docker compose up --build
 ```
 
@@ -209,18 +209,18 @@ docker compose up --build
 
 ## 6. Interactive Demo Script
 
-Pigeon includes an automated scenario runner (`scripts/demo.sh`) that demonstrates all core behaviors against a running stack:
+Pigeon includes an automated scenario runner and multi-channel load suite (`scripts/demo.sh`) that demonstrates all core behaviors against a running stack (dispatching 100+ messages across 5 distinct domains):
 
 ```bash
 ./scripts/demo.sh
 ```
 
 **Scenarios executed by the script:**
-1. **Standard Transfer Flow:** Ingests `TRANSFER_COMPLETED`, processes the outbox event, and delivers an email to MailHog with masked account digits (`**** 4821`).
-2. **Idempotent Replay:** Resends the exact same event and key; verifies HTTP `200 OK` replay with header `Idempotency-Replayed: true`.
-3. **High-Priority Security Alert:** Ingests `FRAUD_SUSPECTED`; verifies delivery through `pigeon.notifications.high` bypassing quiet hours and opt-outs.
-4. **Audit Trail Query:** Queries `GET /api/v1/notifications/{id}` to verify state history, latency measurements, and the SHA-256 hash chain.
-5. **Signed Webhook Callback:** Dispatches an HMAC-SHA256 signed delivery receipt to `POST /api/v1/webhooks/sms/receipts`, transitioning notification status to `DELIVERED`.
+1. **High-Priority Security Alerts (35 events):** Ingests `OTP_REQUESTED` and `FRAUD_SUSPECTED`; verifies delivery through `pigeon.events.high` bypassing quiet hours and opt-outs.
+2. **Standard Financial Transactions (45 events):** Ingests `TRANSFER_COMPLETED`, `PURCHASE_DECLINED`, and `PAYMENT_REMINDER`; routes across Email (MailHog), Push, and SMS.
+3. **Sub-millisecond Idempotency Replays (10 events):** Resends identical events and keys; verifies atomic Redis fast-path HTTP `200 OK` replay with header `Idempotency-Replayed: true`.
+4. **Anti-Abuse Rate Limiting (12 events):** Bursts against single-customer quotas; verifies automated blocking with HTTP `429 Too Many Requests`.
+5. **Signed Webhook Callbacks (5 events):** Dispatches HMAC-SHA256 signed delivery receipts to `POST /api/v1/webhooks/sms/receipts`, transitioning notification status to `DELIVERED`.
 
 ---
 

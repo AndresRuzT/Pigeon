@@ -21,8 +21,8 @@ All contributors are expected to uphold our [Code of Conduct](CODE_OF_CONDUCT.md
 Clone the repository and run the test suite:
 
 ```bash
-git clone https://github.com/andres/pigeon.git
-cd pigeon
+git clone https://github.com/AndresRuzT/Pigeon.git
+cd Pigeon
 ./mvnw clean verify
 ```
 
