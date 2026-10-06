@@ -4,6 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: pigeon-app
+    labels:
+      org.springframework.boot.ignore: "true"
     ports:
       - "${SERVER_PORT:-8080}:8080"
       - "${MANAGEMENT_SERVER_PORT:-8081}:8081"
@@ -46,6 +48,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: pigeon-postgres
+    restart: unless-stopped
     ports:
       - "${PIGEON_POSTGRES_PORT:-5433}:5432"
     environment:
@@ -63,6 +66,7 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     container_name: pigeon-rabbitmq
+    restart: unless-stopped
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -80,6 +84,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: pigeon-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
     healthcheck:
@@ -91,6 +96,7 @@ services:
   mailhog:
     image: mailhog/mailhog:v1.0.1
     container_name: pigeon-mailhog
+    restart: unless-stopped
     ports:
       - "1025:1025"
       - "8025:8025"
@@ -98,6 +104,7 @@ services:
   wiremock:
     image: wiremock/wiremock:3.9.1
     container_name: pigeon-wiremock
+    restart: unless-stopped
     ports:
       - "8089:8080"
     volumes:

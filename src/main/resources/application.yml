@@ -18,6 +18,12 @@ spring:
   application:
     name: pigeon
 
+  docker:
+    compose:
+      enabled: true
+      lifecycle-management: start-only
+      file: docker-compose.yml
+
   datasource:
     url: ${PIGEON_DB_URL:jdbc:postgresql://localhost:${PIGEON_DB_PORT:5433}/pigeon}
     username: ${PIGEON_DB_USER:pigeon_app}
