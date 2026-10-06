@@ -29,7 +29,7 @@ While Phase 1 introduced the initial `outbox_event` table and relay, and Phase 2
    - Configured MDC structured logging with `service="pigeon"`, `correlationId`, `notificationId`, and `customerId`.
    - Provisioned Prometheus configuration and an automated Grafana dashboard (`pigeon-overview.json`).
 4. **Signed Webhook Delivery Receipts**:
-   - `POST /api/v1/webhooks/{channel}/receipts` endpoint protected by HMAC-SHA256 signature verification header (`X-Pigeon-Signature`) against `PIGEON_WEBHOOK_SECRET`.
+   - `POST /api/v1/webhooks/{channel}/receipts` endpoint protected by HMAC-SHA256 signature verification header (`X-Signature`) against `PIGEON_WEBHOOK_SECRET`.
    - Differentiates `ON_ACCEPT` (Email SMTP) vs `ON_RECEIPT` (SMS / Push DLRs) confirmation policies.
 
 ## Consequences

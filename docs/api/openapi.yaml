@@ -1,0 +1,417 @@
+openapi: 3.0.3
+info:
+  title: Pigeon Transactional Notification Service
+  description: >
+    High-reliability, multichannel transactional notification engine for banking systems.
+    Provides distributed idempotency, transactional outbox publishing, channel fallback cascades,
+    quiet hours scheduling, cryptographic audit trail, and signed webhook receipts.
+  version: 1.0.0
+  contact:
+    name: Pigeon Engineering Team
+    url: https://github.com/andres/pigeon
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local Docker / Development Server
+
+paths:
+  /api/v1/events:
+    post:
+      tags:
+        - Events & Notifications
+      summary: Ingest financial business event
+      description: >
+        Receives a business event (e.g. TRANSFER_COMPLETED, FRAUD_SUSPECTED) and asynchronously 
+        enqueues it for reliable multichannel delivery. Enforces boundary validation against raw 
+        PANs / card numbers and account runs. Guarantees idempotency via Idempotency-Key.
+      operationId: ingestEvent
+      security:
+        - bearerAuth:
+            - notifications:write
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Client-generated unique UUID or transaction identifier to guarantee exactly-once processing.
+          schema:
+            type: string
+            example: "tx-7492-9918-20261005"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestEventRequest'
+      responses:
+        '202':
+          description: Event successfully accepted and persisted into the transactional outbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestEventResponse'
+        '200':
+          description: Idempotent replay of a previously accepted event (no duplicate delivery).
+          headers:
+            Idempotency-Replayed:
+              schema:
+                type: boolean
+                example: true
+              description: Indicates the request is an idempotent replay.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestEventResponse'
+        '400':
+          description: Bad request (validation error, or raw sensitive PAN/card number detected).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '401':
+          description: Missing or invalid JWT token.
+        '403':
+          description: Insufficient JWT scopes.
+        '409':
+          description: Idempotency conflict (same Idempotency-Key with different payload content).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+  /api/v1/notifications/{id}:
+    get:
+      tags:
+        - Events & Notifications
+      summary: Query notification status and cryptographic audit trail
+      description: >
+        Retrieves complete notification state, delivery attempts with latencies and error codes,
+        and the immutable cryptographic hash-chained audit log.
+      operationId: getNotification
+      security:
+        - bearerAuth:
+            - notifications:read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique Notification UUID
+          schema:
+            type: string
+            format: uuid
+            example: "c4b3f870-8d5a-4b9b-9c7f-0efb81f12345"
+      responses:
+        '200':
+          description: Notification details and complete audit trail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationResponse'
+        '401':
+          description: Missing or invalid JWT token.
+        '404':
+          description: Notification not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+  /api/v1/webhooks/{channel}/receipts:
+    post:
+      tags:
+        - Delivery Webhooks
+      summary: Process provider delivery receipt (DLR)
+      description: >
+        Receives asynchronous delivery callbacks from external providers (SMS or Push gateways).
+        Requires HMAC-SHA256 signature verification computed over the raw request payload using 
+        the configured webhook secret.
+      operationId: receiveReceipt
+      parameters:
+        - name: channel
+          in: path
+          required: true
+          description: Delivery channel name (PUSH, SMS, EMAIL)
+          schema:
+            type: string
+            enum: [PUSH, SMS, EMAIL]
+            example: "SMS"
+        - name: X-Signature
+          in: header
+          required: true
+          description: Hex-encoded HMAC-SHA256 signature of the raw JSON body using PIGEON_WEBHOOK_SECRET.
+          schema:
+            type: string
+            example: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookReceiptRequest'
+      responses:
+        '200':
+          description: Receipt processed and notification state transitioned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookReceiptResponse'
+        '400':
+          description: Malformed JSON or invalid channel enum.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '401':
+          description: Missing or invalid HMAC signature in X-Signature header.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '404':
+          description: Notification referenced in receipt does not exist.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '409':
+          description: Notification already in a terminal state (DELIVERED or FAILED).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "RS256 JWT signed with dev/prod private key. Requires scopes: notifications:write, notifications:read."
+
+  schemas:
+    IngestEventRequest:
+      type: object
+      required:
+        - customerId
+        - eventType
+        - locale
+        - occurredAt
+        - data
+      properties:
+        customerId:
+          type: string
+          example: "cust-1001"
+          description: "Internal banking customer identifier."
+        eventType:
+          type: string
+          enum: [TRANSFER_COMPLETED, PURCHASE_DECLINED, FRAUD_SUSPECTED, OTP_REQUESTED, PAYMENT_REMINDER]
+          example: "TRANSFER_COMPLETED"
+        locale:
+          type: string
+          example: "es"
+          description: "Customer preferred language (es, en)."
+        occurredAt:
+          type: string
+          format: date-time
+          example: "2026-10-05T20:45:00Z"
+        data:
+          type: object
+          description: "Key-value attributes for template rendering. Must NOT contain unmasked PANs or account runs >= 10 digits."
+          additionalProperties: true
+          example:
+            amount: "150000.00"
+            currency: "COP"
+            recipient: "Carlos Mendoza"
+            accountNumber: "9876543210"
+
+    IngestEventResponse:
+      type: object
+      properties:
+        notificationId:
+          type: string
+          format: uuid
+          example: "c4b3f870-8d5a-4b9b-9c7f-0efb81f12345"
+        status:
+          type: string
+          enum: [PENDING, SENT, DELIVERED, FAILED, DEFERRED]
+          example: "PENDING"
+        priority:
+          type: string
+          enum: [HIGH, LOW]
+          example: "LOW"
+
+    NotificationResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+        eventType:
+          type: string
+        priority:
+          type: string
+          enum: [HIGH, LOW]
+        locale:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, SENT, DELIVERED, FAILED, DEFERRED]
+        failureReason:
+          type: string
+          nullable: true
+          example: null
+        data:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        attempts:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryAttemptResponse'
+        auditTrail:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditRecordResponse'
+
+    DeliveryAttemptResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          enum: [PUSH, SMS, EMAIL]
+        attemptNo:
+          type: integer
+          example: 1
+        outcome:
+          type: string
+          enum: [SUCCESS, FAILURE]
+        providerRef:
+          type: string
+          nullable: true
+          example: "msg-99214"
+        errorCode:
+          type: string
+          nullable: true
+        latencyMs:
+          type: integer
+          example: 45
+        createdAt:
+          type: string
+          format: date-time
+
+    AuditRecordResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+        actor:
+          type: string
+          example: "pigeon-orchestrator"
+        action:
+          type: string
+          example: "STATUS_TRANSITION"
+        fromStatus:
+          type: string
+          nullable: true
+          enum: [PENDING, SENT, DELIVERED, FAILED, DEFERRED]
+        toStatus:
+          type: string
+          enum: [PENDING, SENT, DELIVERED, FAILED, DEFERRED]
+        channel:
+          type: string
+          nullable: true
+          enum: [PUSH, SMS, EMAIL]
+        reason:
+          type: string
+          nullable: true
+        correlationId:
+          type: string
+          nullable: true
+
+    WebhookReceiptRequest:
+      type: object
+      required:
+        - notificationId
+        - providerRef
+        - status
+        - occurredAt
+      properties:
+        notificationId:
+          type: string
+          format: uuid
+          example: "c4b3f870-8d5a-4b9b-9c7f-0efb81f12345"
+        providerRef:
+          type: string
+          example: "wiremock-dlr-999888"
+        status:
+          type: string
+          enum: [DELIVERED, FAILED]
+          example: "DELIVERED"
+        occurredAt:
+          type: string
+          format: date-time
+          example: "2026-10-05T20:50:00Z"
+        errorCode:
+          type: string
+          nullable: true
+          example: null
+        errorMessage:
+          type: string
+          nullable: true
+          example: null
+
+    WebhookReceiptResponse:
+      type: object
+      properties:
+        notificationId:
+          type: string
+          format: uuid
+        newStatus:
+          type: string
+          enum: [DELIVERED, FAILED]
+        processedAt:
+          type: string
+          format: date-time
+
+    ProblemDetail:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "https://pigeon.bank.internal/errors/validation-error"
+        title:
+          type: string
+          example: "Validation Failed"
+        status:
+          type: integer
+          example: 400
+        detail:
+          type: string
+          example: "One or more request parameters failed validation."
+        instance:
+          type: string
+          format: uri
+        timestamp:
+          type: string
+          format: date-time
+        errors:
+          type: object
+          additionalProperties:
+            type: string
