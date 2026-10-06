@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 BASE_URL="${PIGEON_BASE_URL:-http://localhost:8080}"
-WEBHOOK_SECRET="${PIGEON_WEBHOOK_SECRET:-pigeon_dev_webhook_secret_key_32bytes}"
+WEBHOOK_SECRET="${PIGEON_WEBHOOK_SECRET:-pigeon_dev_webhook_secret_key_1234567890}"
 
 echo "========================================================================"
 echo "                   PIGEON BANKING NOTIFICATION ENGINE                   "
@@ -37,12 +37,12 @@ echo "------------------------------------------------------------------------"
 IDEMPOTENCY_KEY_1="demo-transfer-$(date +%s%N)"
 TRANSFER_PAYLOAD=$(cat <<EOF
 {
-  "customerId": "cust-1001",
+  "customerId": "cus_demo_email",
   "eventType": "TRANSFER_COMPLETED",
   "locale": "es",
   "occurredAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
   "data": {
-    "accountNumber": "9876543210",
+    "accountNumber": "4821",
     "amount": "150000.00",
     "currency": "COP",
     "recipient": "Carlos Mendoza"
@@ -92,12 +92,14 @@ echo "------------------------------------------------------------------------"
 IDEMPOTENCY_KEY_3="demo-fraud-$(date +%s%N)"
 FRAUD_PAYLOAD=$(cat <<EOF
 {
-  "customerId": "cust-1002",
+  "customerId": "cus_8F2A91",
   "eventType": "FRAUD_SUSPECTED",
   "locale": "en",
   "occurredAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
   "data": {
-    "accountNumber": "1122334455",
+    "accountNumber": "4821",
+    "amount": "2500000.00",
+    "currency": "COP",
     "location": "Lagos, NG",
     "device": "Unknown Android Browser"
   }
