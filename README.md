@@ -1,10 +1,11 @@
 # Pigeon
 
 <p align="center">
-  <strong>Production-Grade Transactional Notification Engine for Banking & Fintech</strong>
+  <strong>Production-Style Reference Implementation: Transactional Notification Engine for Banking & Fintech</strong>
 </p>
 
 <p align="center">
+  <a href="https://github.com/AndresRuzT/Pigeon/actions/workflows/ci.yml"><img src="https://github.com/AndresRuzT/Pigeon/actions/workflows/ci.yml/badge.svg" alt="CI Pipeline" /></a>
   <img src="https://img.shields.io/badge/Java-21-orange.svg" alt="Java 21" />
   <img src="https://img.shields.io/badge/Spring%20Boot-3.3.4-brightgreen.svg" alt="Spring Boot 3.3.4" />
   <img src="https://img.shields.io/badge/Architecture-Hexagonal-blue.svg" alt="Hexagonal Architecture" />
@@ -12,7 +13,7 @@
   <img src="https://img.shields.io/badge/RabbitMQ-3.13-orange.svg" alt="RabbitMQ 3.13" />
   <img src="https://img.shields.io/badge/Redis-7-red.svg" alt="Redis 7" />
   <img src="https://img.shields.io/badge/Tests-120%20Passed-success.svg" alt="Tests 120 Passed" />
-  <img src="https://img.shields.io/badge/JaCoCo-85%25%20Coverage-success.svg" alt="JaCoCo Coverage" />
+  <img src="https://img.shields.io/badge/JaCoCo-≥85%25%20Coverage%20(domain%20&%20app)-success.svg" alt="JaCoCo Coverage" />
   <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License Apache 2.0" />
 </p>
 
@@ -26,12 +27,18 @@ In financial services, sending a notification is rarely a simple API call to a c
 
 Pigeon solves these operational challenges using proven enterprise integration patterns:
 * **Zero Dual-Write Hazards:** Combines an ACID **Transactional Outbox** pattern with database batching (`SELECT ... FOR UPDATE SKIP LOCKED`) and RabbitMQ **Publisher Confirms**.
-* **Guaranteed Idempotency:** Sub-millisecond distributed Redis caching coupled with PostgreSQL unique constraints and SHA-256 payload checksums.
+* **Guaranteed Idempotency:** Low-latency distributed Redis caching coupled with PostgreSQL unique constraints and SHA-256 payload checksums.
 * **Resilient Multi-Channel Fallback:** Dynamic cascade (`PUSH → SMS → EMAIL`) governed by customer preferences and protected by **Resilience4j Circuit Breakers**, Bulkheads, and Retries.
 * **Priority Routing & Poison Queue Isolation:** Dedicated high-priority queues with TTL-based expiration for time-sensitive security alerts (OTPs, Fraud) alongside an AMQP retry ladder and Dead Letter Queue (DLQ) for low-priority alerts.
-* **Tamper-Evident Audit Trail:** Append-only regulatory audit log secured by PostgreSQL database triggers (prohibiting `UPDATE`, `DELETE`, and `TRUNCATE`) and an immutable **SHA-256 hash chain** (`prev_hash`).
+* **Tamper-Evident Audit Trail:** Append-only regulatory audit log secured by PostgreSQL database triggers (prohibiting `UPDATE`, `DELETE`, and `TRUNCATE`) and an immutable per-notification **SHA-256 hash chain** (`prev_hash`).
 * **Compliance-First Security:** Rejection of unmasked Primary Account Numbers (PANs) via the Luhn algorithm, Logback log masking, OAuth2 RS256 token verification, and HMAC-SHA256 signed delivery webhooks.
 * **Full-Stack Observability:** 10 domain Micrometer metrics scraped by Prometheus and visualizable out-of-the-box via pre-provisioned Grafana dashboards.
+
+### 1.1 Delivery Guarantees
+
+Pigeon provides **at-least-once message delivery with idempotent execution semantics**:
+* **What Pigeon guarantees:** No business event is lost after ingestion (guaranteed by the Transactional Outbox), and duplicate submissions with the same idempotency key return the original response without duplicate dispatches (within a 24-hour TTL).
+* **What Pigeon does NOT guarantee:** Strict global FIFO ordering across different notifications, or true exactly-once delivery across network partitions if an external provider accepts a message right before a connection timeout.
 
 ---
 
@@ -56,9 +63,9 @@ Pigeon is engineered strictly around **Hexagonal Architecture (Ports and Adapter
                   │   │   │                                         │   │   │
                   │   │   └─────────────────────────────────────────┘   │   │
                   │   │                                                 │   │
-                  │   │  • Inbound Ports (Use Cases)                    │   │   │
-                  │   │  • Application Orchestrators & Services         │   │   │
-                  │   │  • Outbound Ports (Repositories, Publishers)    │   │   │
+                  │   │  • Inbound Ports (Use Cases)                    │   │
+                  │   │  • Application Orchestrators & Services         │   │
+                  │   │  • Outbound Ports (Repositories, Publishers)    │   │
                   │   │                                                 │   │
                   │   └─────────────────────────────────────────────────┘   │
                   │                                                         │
@@ -77,7 +84,7 @@ io.github.andres.pigeon
 │   ├── enums               EventType, Channel, Priority, NotificationStatus, DeliveryConfirmationPolicy
 │   ├── exception           DomainException, SensitiveDataException, DuplicateEventException...
 │   ├── model               Notification, DeliveryAttempt, AuditRecord, Template, CustomerPreference
-│   └── vo                  NotificationId, CustomerId, Priority, IdempotencyKey
+│   └── vo                  CustomerId, IdempotencyKey, Destination, MaskedCardNumber, MaskedAccountNumber, Money
 ├── application
 │   ├── port
 │   │   ├── in              IngestEventUseCase, ProcessWebhookReceiptUseCase, QueryNotificationUseCase
@@ -136,11 +143,11 @@ $$\text{PUSH} \longrightarrow \text{SMS} \longrightarrow \text{EMAIL}$$
 * **Resilience4j Circuit Breakers:** Protect each channel independently. If SMS provider error rates exceed 50% or latency spikes, the SMS circuit breaker opens immediately.
 * **Automatic Fallback:** Upon failure or circuit trip, `DeliveryOrchestratorService` falls back to the next eligible channel in the cascade.
 * **Two-Tier Retries:**
-  * **HIGH Priority (OTP, Fraud):** Delivered via `pigeon.notifications.high` with a 60-second TTL. If expired, messages land in `pigeon.expired` and are marked `FAILED` (`EXPIRED`). High-priority messages are **never delayed** in multi-minute retry queues.
-  * **LOW Priority (Transfers, Reminders):** Delivered via `pigeon.notifications.low`. Failed attempts enter an AMQP TTL retry ladder (`10s`, `30s`, `60s`) before moving to the Dead Letter Queue (`pigeon.notifications.dlq`).
+  * **HIGH Priority (OTP, Fraud):** Delivered via `pigeon.events.high` with a 60-second TTL. If expired, messages land in `pigeon.expired` and are marked `FAILED` (`EXPIRED`). High-priority messages are **never delayed** in multi-minute retry queues.
+  * **LOW Priority (Transfers, Reminders):** Delivered via `pigeon.events.low`. Failed attempts enter an AMQP TTL retry ladder (`pigeon.retry.30s` → `pigeon.retry.2m` → `pigeon.retry.10m`) before moving to the Dead Letter Queue (`pigeon.dlq`).
 
 ### 3.3 Hybrid Idempotency Engine
-* **Redis Fast-Path:** Computes `pigeon:idempotency:{clientId}:{idempotencyKey}` with a 24-hour TTL for sub-millisecond duplicate detection.
+* **Redis Fast-Path:** Computes `pigeon:idempotency:{clientId}:{idempotencyKey}` with a 24-hour TTL for low-latency duplicate detection.
 * **Database Constraint:** Relational constraint `uk_notification_client_idempotency` ensures absolute consistency during concurrent race conditions.
 * **Payload Verification:** Computes a SHA-256 digest of the request payload. Reusing an existing key with different data returns `409 Conflict`. Identical requests return `200 OK` with the header `Idempotency-Replayed: true`.
 
@@ -152,12 +159,20 @@ $$\text{PUSH} \longrightarrow \text{SMS} \longrightarrow \text{EMAIL}$$
 * **Database Triggers:** PostgreSQL table triggers `trg_audit_log_immutable` and statement trigger `trg_audit_log_truncate` reject any `UPDATE`, `DELETE`, or `TRUNCATE` command on `audit_log` and `delivery_attempt`.
 * **Cryptographic Hash Chain:** Each record stores a `prev_hash` column:
   $$\text{Hash}_N = \text{SHA-256}(\text{Hash}_{N-1} \,\|\, \text{notification\_id} \,\|\, \text{from\_status} \,\|\, \text{to\_status} \,\|\, \text{occurred\_at} \,\|\, \text{failure\_reason} \,\|\, \text{actor} \,\|\, \text{channel})$$
-  Any database alteration breaks the chain, providing mathematically verifiable integrity for banking regulatory examiners.
+  Any database alteration breaks the chain, providing tamper-evident integrity for banking regulatory examiners (computed as a per-notification hash chain).
 
 ### 3.6 Signed Webhook Delivery Receipts
 For asynchronous channels (SMS, Push), external providers notify Pigeon of final delivery via webhooks (`POST /api/v1/webhooks/{channel}/receipts`):
 * Secured via HMAC-SHA256 signature in the `X-Signature` header computed over the raw request payload using `PIGEON_WEBHOOK_SECRET`.
 * Verified using constant-time comparison (`MessageDigest.isEqual`) to prevent timing side-channel attacks.
+
+### 3.7 Known Limitations
+
+To maintain transparent, pragmatic engineering standards, Pigeon documents the following design trade-offs:
+1. **At-Least-Once Delivery**: The Transactional Outbox pattern guarantees at-least-once message publishing. Downstream consumers and notification handlers must be designed to execute idempotently.
+2. **Channel Fallback Duplicate Risk**: Cascading to an alternative channel (e.g. `PUSH → SMS`) upon a provider timeout can produce duplicate customer notifications if the primary provider accepted the payload right before the connection dropped.
+3. **Webhook Replay Protection**: The signed delivery receipt endpoint verifies payload authenticity via HMAC-SHA256, but currently lacks replay protection (it does not enforce a timestamp expiration window or unique nonces).
+4. **Audit Hash Chain Scope**: The SHA-256 hash chain provides tamper-evident integrity per notification lifecycle. While it detects illicit row alterations, an adversary with full database superuser/DBA write access could theoretically recalculate the sequential chain.
 
 ---
 
@@ -200,16 +215,16 @@ docker compose up --build
 |---|---|---|
 | **Pigeon REST API / Swagger UI** | `http://localhost:8080/swagger-ui.html` | Interactive OpenAPI documentation |
 | **MailHog Web UI** | `http://localhost:8025` | Inspect delivered email notifications |
-| **RabbitMQ Management** | `http://localhost:15672` | `guest` / `guest` (Queues, exchanges, DLQs) |
+| **RabbitMQ Management** | `http://localhost:15672` | `guest` / `guest` *(dev only, never in production)* |
 | **Prometheus** | `http://localhost:9090` | Metrics scraper & PromQL console |
-| **Grafana** | `http://localhost:3000` | `admin` / `admin` (Pre-provisioned Pigeon dashboard) |
+| **Grafana** | `http://localhost:3000` | `admin` / `admin` *(dev only, never in production)* |
 | **WireMock Admin** | `http://localhost:8089/__admin` | Simulated SMS & Push endpoints |
 
 ---
 
 ## 6. Interactive Demo Script
 
-Pigeon includes an automated scenario runner and multi-channel load suite (`scripts/demo.sh`) that demonstrates all core behaviors against a running stack (dispatching 100+ messages across 5 distinct domains):
+Pigeon includes an automated scenario runner and multi-channel load suite (`scripts/demo.sh`) that demonstrates all core behaviors against a running stack (dispatching 100+ messages across 5 automated test scenarios):
 
 ```bash
 ./scripts/demo.sh
@@ -218,7 +233,7 @@ Pigeon includes an automated scenario runner and multi-channel load suite (`scri
 **Scenarios executed by the script:**
 1. **High-Priority Security Alerts (35 events):** Ingests `OTP_REQUESTED` and `FRAUD_SUSPECTED`; verifies delivery through `pigeon.events.high` bypassing quiet hours and opt-outs.
 2. **Standard Financial Transactions (45 events):** Ingests `TRANSFER_COMPLETED`, `PURCHASE_DECLINED`, and `PAYMENT_REMINDER`; routes across Email (MailHog), Push, and SMS.
-3. **Sub-millisecond Idempotency Replays (10 events):** Resends identical events and keys; verifies atomic Redis fast-path HTTP `200 OK` replay with header `Idempotency-Replayed: true`.
+3. **Low-Latency Idempotency Replays (10 events):** Resends identical events and keys; verifies atomic Redis fast-path HTTP `200 OK` replay with header `Idempotency-Replayed: true`.
 4. **Anti-Abuse Rate Limiting (12 events):** Bursts against single-customer quotas; verifies automated blocking with HTTP `429 Too Many Requests`.
 5. **Signed Webhook Callbacks (5 events):** Dispatches HMAC-SHA256 signed delivery receipts to `POST /api/v1/webhooks/sms/receipts`, transitioning notification status to `DELIVERED`.
 
@@ -273,8 +288,11 @@ curl -X GET http://localhost:8080/api/v1/notifications/c4b3f870-8d5a-4b9b-9c7f-0
 ### 7.4 Submit Provider Delivery Receipt (`POST /api/v1/webhooks/{channel}/receipts`)
 
 ```bash
+# Developer secret only (never hardcode in production; configure via KMS / Vault)
+export PIGEON_WEBHOOK_SECRET="${PIGEON_WEBHOOK_SECRET:-pigeon_dev_webhook_secret_key_32bytes}"
+
 PAYLOAD='{"notificationId":"c4b3f870-8d5a-4b9b-9c7f-0efb81f12345","providerRef":"gw-123","status":"DELIVERED","occurredAt":"2026-10-05T20:31:00Z"}'
-SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "pigeon_dev_webhook_secret_key_32bytes" | sed 's/^.* //')
+SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$PIGEON_WEBHOOK_SECRET" | sed 's/^.* //')
 
 curl -X POST http://localhost:8080/api/v1/webhooks/sms/receipts \
   -H "Content-Type: application/json" \
@@ -309,7 +327,7 @@ Pigeon enforces a rigorous testing regimen across multiple tiers:
 * **Domain Unit Tests:** Pure JUnit 5 tests asserting business invariants, state transitions, Luhn checks, and template rendering without Spring context overhead.
 * **ArchUnit Tests:** Programmatically validates hexagonal boundary purity in `HexagonalArchitectureTest`.
 * **Integration Tests:** Spin up ephemeral PostgreSQL and RabbitMQ containers using **Testcontainers** (`AuditImmutabilityIntegrationTest`, `OutboxCrashRecoveryIntegrationTest`, `WebhookReceiptIntegrationTest`, `EventIngestionIntegrationTest`).
-* **Code Coverage (JaCoCo):** Enforces a minimum **85% line coverage** on `domain.*` and `application.*`.
+* **Code Coverage (JaCoCo):** Enforces a minimum **85% line coverage** threshold strictly on `io.github.andres.pigeon.domain.*` and `io.github.andres.pigeon.application.*` packages via Maven build enforcement rules (`jacoco:check`). Dynamic build and test statuses are verified by the GitHub Actions CI pipeline.
 
 Run the complete build and quality check locally:
 ```bash
